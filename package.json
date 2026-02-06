@@ -1,0 +1,163 @@
+{
+  "name": "android-toolkit",
+  "displayName": "Android Toolkit for VS Code",
+  "description": "Fast, lightweight Android device and emulator management using CLI tools",
+  "version": "0.1.0",
+  "publisher": "android-toolkit",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "android-toolkit",
+          "title": "Android Toolkit",
+          "icon": "$(device-mobile)"
+        }
+      ]
+    },
+    "views": {
+      "android-toolkit": [
+        {
+          "id": "androidProjectView",
+          "name": "Android Project",
+          "icon": "$(folder-library)",
+          "contextualTitle": "Android Project"
+        },
+        {
+          "id": "emulatorControlView",
+          "name": "Emulator Control",
+          "icon": "$(vm)",
+          "contextualTitle": "Emulator Control"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "android-toolkit.listDevices",
+        "title": "Android: List Devices"
+      },
+      {
+        "command": "android-toolkit.startEmulator",
+        "title": "Android: Start Emulator"
+      },
+      {
+        "command": "android-toolkit.stopEmulator",
+        "title": "Android: Stop Emulator"
+      },
+      {
+        "command": "android-toolkit.createEmulator",
+        "title": "Android: Create Emulator"
+      },
+      {
+        "command": "android-toolkit.refreshProjectView",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.openInExplorer",
+        "title": "Open in Explorer",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "android-toolkit.refreshEmulatorControl",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.emulator.rotate",
+        "title": "Android: Rotate Screen"
+      },
+      {
+        "command": "android-toolkit.emulator.screenshot",
+        "title": "Android: Take Screenshot"
+      },
+      {
+        "command": "android-toolkit.emulator.coldBoot",
+        "title": "Android: Cold Boot"
+      },
+      {
+        "command": "android-toolkit.emulator.warmBoot",
+        "title": "Android: Warm Boot"
+      },
+      {
+        "command": "android-toolkit.emulator.wipeData",
+        "title": "Android: Wipe Data"
+      },
+      {
+        "command": "android-toolkit.emulator.toggleNetwork",
+        "title": "Android: Toggle Network"
+      },
+      {
+        "command": "android-toolkit.openLogcat",
+        "title": "Android: Open Logcat Viewer",
+        "icon": "$(output)"
+      },
+      {
+        "command": "android-toolkit.clearLogcat",
+        "title": "Android: Clear Logcat"
+      },
+      {
+        "command": "android-toolkit.attachDebugger",
+        "title": "Android: Attach Debugger",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "android-toolkit.detachDebugger",
+        "title": "Android: Detach Debugger",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "android-toolkit.toggleBreakpoint",
+        "title": "Android: Toggle Breakpoint"
+      },
+      {
+        "command": "android-toolkit.debugStatus",
+        "title": "Android: Debug Status"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "android-toolkit.refreshProjectView",
+          "when": "view == androidProjectView",
+          "group": "navigation"
+        },
+        {
+          "command": "android-toolkit.refreshEmulatorControl",
+          "when": "view == emulatorControlView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "android-toolkit.openInExplorer",
+          "when": "view == androidProjectView && viewItem =~ /folder|file/",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}
