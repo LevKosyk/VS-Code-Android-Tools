@@ -16,6 +16,7 @@ import { ProjectNodeType, CategoryId, ProjectNodeData, CATEGORY_CONFIGS } from '
  */
 export class ProjectTreeItem extends vscode.TreeItem {
   public readonly data: ProjectNodeData;
+  public children: ProjectTreeItem[] = [];
 
   constructor(
     data: ProjectNodeData,
@@ -35,6 +36,10 @@ export class ProjectTreeItem extends vscode.TreeItem {
     this.description = data.description;
     this.tooltip = this.createTooltip();
     this.contextValue = this.getContextValue();
+    
+    if (children) {
+      this.children = children;
+    }
 
     // Set resourceUri for file explorer features
     if (data.resourceUri) {
@@ -48,12 +53,24 @@ export class ProjectTreeItem extends vscode.TreeItem {
     }
 
     // Set command for file items to open on click
+    // Use custom command to ensure proper language activation (Java/Kotlin)
     if (data.type === 'file' && data.resourceUri) {
       this.command = {
-        command: 'vscode.open',
+        command: 'android-toolkit.openFile',
         title: 'Open File',
-        arguments: [data.resourceUri],
+        arguments: [data.resourceUri.fsPath],
       };
+    }
+  }
+
+  /**
+   * Add a child node
+   */
+  public addChild(child: ProjectTreeItem): void {
+    this.children.push(child);
+    // Ensure state is collapsible if it has children
+    if (this.collapsibleState === vscode.TreeItemCollapsibleState.None) {
+      this.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
     }
   }
 
@@ -99,6 +116,9 @@ export class ProjectTreeItem extends vscode.TreeItem {
       case 'category':
         return this.getCategoryIcon();
       
+      case 'package':
+        return new vscode.ThemeIcon('symbol-package');
+
       default:
         return undefined;
     }
@@ -172,6 +192,7 @@ export function createRootNode(projectName: string): ProjectTreeItem {
     {
       type: 'root',
       label: projectName,
+      description: 'Module',
     },
     vscode.TreeItemCollapsibleState.Expanded
   );
@@ -214,5 +235,20 @@ export function createFileNode(
     isDirectory 
       ? vscode.TreeItemCollapsibleState.Collapsed 
       : vscode.TreeItemCollapsibleState.None
+  );
+}
+
+/**
+ * Create a package node
+ */
+export function createPackageNode(uri: vscode.Uri, name: string, fullPackage: string): ProjectTreeItem {
+  return new ProjectTreeItem(
+    {
+      type: 'package',
+      label: name,
+      resourceUri: uri,
+      description: '', // Can show full package if needed
+    },
+    vscode.TreeItemCollapsibleState.Collapsed
   );
 }

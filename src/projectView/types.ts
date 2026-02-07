@@ -12,6 +12,7 @@ export type ProjectNodeType =
   | 'root'           // Project root
   | 'category'       // Virtual folder (Manifests, Java, Res, etc.)
   | 'folder'         // Real folder
+  | 'package'        // Java/Kotlin package
   | 'file';          // Real file
 
 /**

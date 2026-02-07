@@ -213,14 +213,14 @@ export class EmulatorControlProvider implements vscode.TreeDataProvider<Emulator
     networkStatus?: NetworkStatus
   ): EmulatorControlItem[] {
     const actions: { id: ActionId; label: string }[] = [
-      { id: 'rotate', label: '🔄 Rotate Screen' },
-      { id: 'screenshot', label: '📸 Take Screenshot' },
-      { id: 'coldBoot', label: '🔌 Cold Boot' },
-      { id: 'warmBoot', label: '♻️ Warm Boot' },
-      { id: 'wipeData', label: '🧹 Wipe Data' },
+      { id: 'rotate', label: 'Rotate Screen' },
+      { id: 'screenshot', label: 'Take Screenshot' },
+      { id: 'coldBoot', label: 'Cold Boot' },
+      { id: 'warmBoot', label: 'Warm Boot' },
+      { id: 'wipeData', label: 'Wipe Data' },
       { 
         id: 'toggleNetwork', 
-        label: networkStatus === 'enabled' ? '📶 Disable Network' : '📶 Enable Network' 
+        label: networkStatus === 'enabled' ? 'Disable Network' : 'Enable Network' 
       },
     ];
 

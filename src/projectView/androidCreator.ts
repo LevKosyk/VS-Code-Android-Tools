@@ -428,3 +428,120 @@ function ensureExtension(fileName: string, type: ResourceFolderType): string {
 
   return fileName;
 }
+
+/**
+ * Create a new Java/Kotlin class
+ */
+export async function createClassFlow(
+  item: ProjectTreeItem | undefined,
+  provider: AndroidProjectProvider
+): Promise<void> {
+  // Determine target folder and package
+  let targetUri: vscode.Uri | undefined;
+  let packageName = '';
+
+  if (item && item.data.type === 'package' && item.data.resourceUri) {
+    targetUri = item.data.resourceUri;
+    // Extract package from tree item context if available, or path
+    // For now, simpler to ask user or infer from path
+    // We stored full package in description or can infer
+  } else if (item && item.data.type === 'folder' && item.data.resourceUri) {
+     targetUri = item.data.resourceUri;
+  } else {
+    // Fallback to workspace root or ask user to pick
+     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+     if (workspaceRoot) {
+       // Try to find main java/kotlin source set
+       const javaRoot = vscode.Uri.joinPath(workspaceRoot, 'app/src/main/java');
+       try {
+         await vscode.workspace.fs.stat(javaRoot);
+         targetUri = javaRoot;
+       } catch {
+         targetUri = workspaceRoot;
+       }
+     }
+  }
+
+  if (!targetUri) {
+    vscode.window.showErrorMessage('Select a package or folder to create the class in.');
+    return;
+  }
+
+  // 1. Ask for class name
+  const nameInput = await vscode.window.showInputBox({
+    prompt: 'Enter class name (e.g. MainActivity)',
+    placeHolder: 'MyClass',
+    validateInput: (value) => {
+      if (!value || !/^[A-Z][a-zA-Z0-9]*$/.test(value)) {
+        return 'Class name must start with uppercase letter and contain only alphanumeric characters';
+      }
+      return null;
+    }
+  });
+
+  if (!nameInput) return;
+
+  // 2. Ask for type (Java/Kotlin)
+  const type = await vscode.window.showQuickPick(['Kotlin (.kt)', 'Java (.java)'], {
+    placeHolder: 'Select language'
+  });
+
+  if (!type) return;
+
+  const isKotlin = type.startsWith('Kotlin');
+  const extension = isKotlin ? '.kt' : '.java';
+  const fileName = nameInput + extension;
+  const fileUri = vscode.Uri.joinPath(targetUri, fileName);
+
+  // 3. Determine package name from path
+  // Heuristic: relative path from src/main/java or src/main/kotlin
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(targetUri);
+  if (workspaceFolder) {
+    const relativePath = path.relative(workspaceFolder.uri.fsPath, targetUri.fsPath);
+    // Remove prefix like app/src/main/java/
+    const parts = relativePath.split(path.sep);
+    const javaIndex = parts.indexOf('java');
+    const kotlinIndex = parts.indexOf('kotlin');
+    let packagePathParts: string[] = [];
+    
+    if (javaIndex !== -1) {
+      packagePathParts = parts.slice(javaIndex + 1);
+    } else if (kotlinIndex !== -1) {
+      packagePathParts = parts.slice(kotlinIndex + 1);
+    } else {
+       // fallback
+       packagePathParts = parts;
+    }
+    
+    packageName = packagePathParts.join('.');
+  }
+
+  // 4. Create file content
+  const content = `package ${packageName}
+
+${isKotlin ? 'class' : 'public class'} ${nameInput} {
+    ${isKotlin ? '// TODO: Implement class' : '// TODO: Implement class'}
+}`;
+
+  // 5. Write file
+  try {
+    const fs = require('fs');
+    if (fs.existsSync(fileUri.fsPath)) {
+      vscode.window.showErrorMessage(`File ${fileName} already exists!`);
+      return;
+    }
+    
+    fs.writeFileSync(fileUri.fsPath, content);
+    
+    // Open the new file
+    const doc = await vscode.workspace.openTextDocument(fileUri);
+    await vscode.window.showTextDocument(doc);
+    
+    // Refresh tree
+    provider.refresh();
+    
+    vscode.window.showInformationMessage(`Created ${fileName}`);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to create class: ${error}`);
+  }
+}

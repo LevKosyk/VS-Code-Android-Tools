@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 // Core
 import { detectSdk, isSdkAvailable } from './core/sdkDetector';
 import { AndroidToolkitError } from './core/errors';
+import { checkLanguageExtensions, ensureLanguageMode } from './core/languageSupport';
 
 // Device Management
 import { listDevicesDetailed, listRunningEmulators } from './devices/deviceManager';
@@ -28,6 +29,7 @@ import {
 
 // Emulator Control
 import { EmulatorControlProvider } from './emulatorControl/emulatorControlProvider';
+import { EmulatorControlPanel } from './emulatorControl/emulatorPanel';
 import {
   rotateScreen,
   takeScreenshot,
@@ -37,6 +39,12 @@ import {
   toggleNetwork,
   getAvdNameForDevice,
 } from './emulatorControl/emulatorCommands';
+
+// Services
+import { AdbService, EmulatorService, DEFAULT_LOCATION_PRESETS } from './services';
+
+// Profiler
+import { ProfilerPanel } from './profiler/profilerPanel';
 
 // Device Manager
 import { 
@@ -508,6 +516,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.createLocale', (item?: ProjectTreeItem) => {
       createLocaleFlow(item, projectProvider);
     }),
+    vscode.commands.registerCommand('android-toolkit.createClass', (item?: ProjectTreeItem) => {
+      const { createClassFlow } = require('./projectView/androidCreator');
+      createClassFlow(item, projectProvider);
+    }),
 
     // Device Manager commands
     vscode.commands.registerCommand('android-toolkit.refreshDeviceManager', () => deviceManagerProvider.refresh()),
@@ -558,9 +570,162 @@ export function activate(context: vscode.ExtensionContext): void {
       const { debugSession } = require('./debug/debugAdapter');
       debugSession.showStatus();
     }),
+
+    // Advanced Emulator Control Panel
+    vscode.commands.registerCommand('android-toolkit.openEmulatorPanel', () => {
+      EmulatorControlPanel.createOrShow(context.extensionUri);
+    }),
+
+    // App Management
+    vscode.commands.registerCommand('android-toolkit.installApk', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators. Start an emulator first.');
+        return;
+      }
+      const deviceId = emulators[0].id;
+      const apkUri = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        filters: { 'APK Files': ['apk'] },
+        title: 'Select APK to Install',
+      });
+      if (apkUri && apkUri[0]) {
+        await withProgress('Installing APK...', async () => {
+          const result = await AdbService.installApk(deviceId, apkUri[0].fsPath);
+          if (result.success) {
+            showInfo(result.message);
+          } else {
+            showError(result.message);
+          }
+        });
+      }
+    }),
+
+    vscode.commands.registerCommand('android-toolkit.uninstallApp', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators.');
+        return;
+      }
+      const deviceId = emulators[0].id;
+      const packages = await AdbService.listPackages(deviceId);
+      const pkg = await vscode.window.showQuickPick(packages, { placeHolder: 'Select app to uninstall' });
+      if (pkg) {
+        const result = await AdbService.uninstallApp(deviceId, pkg);
+        result.success ? showInfo(result.message) : showError(result.message);
+      }
+    }),
+
+    vscode.commands.registerCommand('android-toolkit.restartApp', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators.');
+        return;
+      }
+      const deviceId = emulators[0].id;
+      const packages = await AdbService.listPackages(deviceId);
+      const pkg = await vscode.window.showQuickPick(packages, { placeHolder: 'Select app to restart' });
+      if (pkg) {
+        await withProgress('Restarting app...', async () => {
+          const result = await AdbService.restartApp(deviceId, pkg);
+          result.success ? showInfo(result.message) : showError(result.message);
+        });
+      }
+    }),
+
+    // Location
+    vscode.commands.registerCommand('android-toolkit.setLocation', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators.');
+        return;
+      }
+      const deviceId = emulators[0].id;
+      const presets = DEFAULT_LOCATION_PRESETS.map(p => ({ label: p.name, id: p.id, lat: p.latitude, lng: p.longitude }));
+      const selected = await vscode.window.showQuickPick(presets, { placeHolder: 'Select location preset' });
+      if (selected) {
+        const result = await AdbService.setLocation(deviceId, selected.lat, selected.lng);
+        result.success ? showInfo(result.message) : showError(result.message);
+      }
+    }),
+
+    // Screen Recording
+    vscode.commands.registerCommand('android-toolkit.startRecording', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators.');
+        return;
+      }
+      const result = await AdbService.startScreenRecording(emulators[0].id);
+      result.success ? showInfo(result.message) : showError(result.message);
+    }),
+
+    vscode.commands.registerCommand('android-toolkit.stopRecording', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators.');
+        return;
+      }
+      await withProgress('Stopping recording...', async () => {
+        const result = await AdbService.stopScreenRecording(emulators[0].id);
+        if (result.success && result.data) {
+          showInfo(result.message);
+          vscode.commands.executeCommand('vscode.open', vscode.Uri.file(result.data));
+        } else {
+          showError(result.message);
+        }
+      });
+    }),
+
+    // Battery
+    vscode.commands.registerCommand('android-toolkit.setBattery', async () => {
+      const emulators = await listRunningEmulators();
+      if (emulators.length === 0) {
+        showWarning('No running emulators.');
+        return;
+      }
+      const level = await vscode.window.showInputBox({ prompt: 'Battery level (0-100)', value: '50' });
+      if (level) {
+        const result = await AdbService.setBatteryLevel(emulators[0].id, parseInt(level, 10));
+        result.success ? showInfo(result.message) : showError(result.message);
+      }
+    }),
+
+
+    // Internal command for opening files correctly (preserves language support)
+    vscode.commands.registerCommand('android-toolkit.openFile', async (uriOrPath: vscode.Uri | string) => {
+      try {
+        let uri: vscode.Uri;
+        
+        if (typeof uriOrPath === 'string') {
+          uri = vscode.Uri.file(uriOrPath);
+        } else if (uriOrPath instanceof vscode.Uri) {
+          uri = uriOrPath;
+        } else {
+          // Fallback if data is passed incorrectly
+          uri = vscode.Uri.file(String(uriOrPath));
+        }
+        
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc);
+        
+        // Ensure language mode is correct (sometimes auto-detect fails for .kt)
+        await ensureLanguageMode(doc);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to open file: ${error}`);
+      }
+    }),
+
+    // Performance Profiler
+    vscode.commands.registerCommand('android-toolkit.openProfiler', () => {
+      ProfilerPanel.createOrShow(context.extensionUri);
+    }),
   ];
 
   context.subscriptions.push(...commands);
+
+  // Check language support extensions
+  checkLanguageExtensions().catch(console.error);
 
   console.log('Android Toolkit activated!');
 }

@@ -159,7 +159,7 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
     // Android is always available (we may show error inside)
     nodes.push(new DeviceManagerItem(
       { type: 'platform', platform: 'android' },
-      '🤖 Android',
+      'Android',
       vscode.TreeItemCollapsibleState.Expanded
     ));
 
@@ -167,7 +167,7 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
     if (isIOSAvailable()) {
       nodes.push(new DeviceManagerItem(
         { type: 'platform', platform: 'ios' },
-        '🍎 iOS',
+        'iOS',
         vscode.TreeItemCollapsibleState.Expanded
       ));
     }
@@ -175,7 +175,7 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
     // Create Device action
     nodes.push(new DeviceManagerItem(
       { type: 'create' },
-      '➕ Create Device',
+      'Create Device',
       vscode.TreeItemCollapsibleState.None
     ));
 
@@ -224,11 +224,9 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           platformId: avd.name,
         };
 
-        const stateIcon = device.state === 'running' ? '🟢' : '⚪';
-        
         return new DeviceManagerItem(
           { type: 'device', device },
-          `${stateIcon} ${avd.name}`,
+          avd.name,
           vscode.TreeItemCollapsibleState.Collapsed
         );
       });
@@ -281,11 +279,9 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           platformId: sim.udid,
         };
 
-        const stateIcon = device.state === 'running' ? '🟢' : '⚪';
-
         return new DeviceManagerItem(
           { type: 'device', device },
-          `${stateIcon} ${sim.name}`,
+          sim.name,
           vscode.TreeItemCollapsibleState.Collapsed
         );
       });
@@ -307,20 +303,20 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
     if (device.state === 'running') {
       actions.push(new DeviceManagerItem(
         { type: 'action', action: 'stop', device },
-        '⏹ Stop',
+        'Stop',
         vscode.TreeItemCollapsibleState.None
       ));
     } else {
       actions.push(new DeviceManagerItem(
         { type: 'action', action: 'launch', device },
-        '▶️ Launch',
+        'Launch',
         vscode.TreeItemCollapsibleState.None
       ));
     }
 
     actions.push(new DeviceManagerItem(
       { type: 'action', action: 'delete', device },
-      '🗑 Delete',
+      'Delete',
       vscode.TreeItemCollapsibleState.None
     ));
 

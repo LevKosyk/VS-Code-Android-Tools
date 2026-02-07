@@ -10,7 +10,8 @@ import {
   ProjectTreeItem, 
   createRootNode, 
   createCategoryNode, 
-  createFileNode 
+  createFileNode,
+  createPackageNode
 } from './projectTreeItem';
 import { 
   scanCategory, 
@@ -139,9 +140,112 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
       return this.groupByDirectory(result.files, result.rootPath);
     }
 
+    // Build package tree for Java/Kotlin
+    if (categoryId === 'java') {
+      return this.buildPackageTree(result.files, result.rootPath);
+    }
+
     return result.files.map(file => 
       createFileNode(file.uri, file.name, file.isDirectory)
     );
+  }
+
+  /**
+   * Build hierarchical package tree for Java/Kotlin files
+   */
+  private async buildPackageTree(
+    files: DiscoveredFile[],
+    rootPath: string | undefined
+  ): Promise<ProjectTreeItem[]> {
+    if (!rootPath) {
+      return files.map(f => createFileNode(f.uri, f.name, f.isDirectory));
+    }
+
+    // Map to store directory nodes
+    const rootNodes: ProjectTreeItem[] = [];
+    const dirMap = new Map<string, ProjectTreeItem>();
+
+    // Sort files by path to ensure parent folders are processed first
+    files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+
+    for (const file of files) {
+      const relPath = file.relativePath;
+      const parts = relPath.split(path.sep);
+      const fileName = parts.pop()!;
+      
+      // Determine package path (directory structure)
+      // e.g. com/example/app/MainActivity.kt -> com.example.app
+      
+      // If file is at root of source set
+      if (parts.length === 0) {
+        rootNodes.push(createFileNode(file.uri, file.name, file.isDirectory));
+        continue;
+      }
+
+      // Build or find package nodes
+      let currentPath = '';
+      let parentNode: ProjectTreeItem | undefined;
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        const isLastPart = i === parts.length - 1;
+        const parentPath = currentPath;
+        currentPath = currentPath ? `${currentPath}.${part}` : part;
+
+        if (!dirMap.has(currentPath)) {
+          // Flatten logic: if parent has only one child and it's a folder, merge them?
+          // For now, let's build a standard tree first.
+          
+          // Create package node
+          const folderUri = vscode.Uri.file(path.join(rootPath, ...currentPath.split('.')));
+          const node = createPackageNode(folderUri, part, currentPath);
+          
+          dirMap.set(currentPath, node);
+
+          if (parentNode) {
+            parentNode.addChild(node);
+          } else {
+            rootNodes.push(node);
+          }
+        }
+        
+        parentNode = dirMap.get(currentPath);
+      }
+
+      // Add file to the package node
+      if (parentNode) {
+        parentNode.addChild(createFileNode(file.uri, file.name, file.isDirectory));
+      }
+    }
+
+    // Post-processing: Flatten empty intermediate packages
+    // (Optional optimization to match Android Studio's "Compact Middle Packages")
+    // e.g. com -> example -> app  becomes com.example.app if no other files
+
+    return this.compactPackages(rootNodes);
+  }
+
+  /**
+   * Compact empty middle packages (e.g. com -> example -> app  => com.example.app)
+   */
+  private compactPackages(nodes: ProjectTreeItem[]): ProjectTreeItem[] {
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (node.data.type === 'package' && node.children && node.children.length === 1) {
+        const child = node.children[0];
+        if (child.data.type === 'package') {
+          // Merge with child
+          node.label = `${node.label}.${child.label}`;
+          node.data.label = node.label; // Update data label too
+          node.children = child.children;
+          node.data.resourceUri = child.data.resourceUri; // Point to deeper path
+          
+          // Re-process this node since we pulled up a child
+          i--; 
+        }
+      }
+    }
+    return nodes;
   }
 
   /**

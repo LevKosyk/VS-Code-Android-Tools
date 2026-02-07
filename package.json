@@ -173,6 +173,48 @@
         "command": "android-toolkit.deviceManager.delete",
         "title": "Delete Device",
         "icon": "$(trash)"
+      },
+      {
+        "command": "android-toolkit.openEmulatorPanel",
+        "title": "Android: Open Emulator Control",
+        "icon": "$(vm)"
+      },
+      {
+        "command": "android-toolkit.installApk",
+        "title": "Android: Install APK",
+        "icon": "$(package)"
+      },
+      {
+        "command": "android-toolkit.uninstallApp",
+        "title": "Android: Uninstall App"
+      },
+      {
+        "command": "android-toolkit.restartApp",
+        "title": "Android: Restart App"
+      },
+      {
+        "command": "android-toolkit.setLocation",
+        "title": "Android: Set Location",
+        "icon": "$(location)"
+      },
+      {
+        "command": "android-toolkit.startRecording",
+        "title": "Android: Start Screen Recording",
+        "icon": "$(circle-filled)"
+      },
+      {
+        "command": "android-toolkit.stopRecording",
+        "title": "Android: Stop Screen Recording",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "android-toolkit.setBattery",
+        "title": "Android: Set Battery Level"
+      },
+      {
+        "command": "android-toolkit.openProfiler",
+        "title": "Android: Open Performance Profiler",
+        "icon": "$(pulse)"
       }
     ],
     "menus": {
