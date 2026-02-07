@@ -19,6 +19,12 @@ import { listSystemImages, listDeviceProfiles, createAvd } from './emulators/avd
 // Project View
 import { AndroidProjectProvider } from './projectView/projectTreeProvider';
 import { ProjectTreeItem } from './projectView/projectTreeItem';
+import {
+  createResourceFlow,
+  createFolderFlow,
+  createAssetFlow,
+  createLocaleFlow,
+} from './projectView/androidCreator';
 
 // Emulator Control
 import { EmulatorControlProvider } from './emulatorControl/emulatorControlProvider';
@@ -31,6 +37,20 @@ import {
   toggleNetwork,
   getAvdNameForDevice,
 } from './emulatorControl/emulatorCommands';
+
+// Device Manager
+import { 
+  DeviceManagerProvider,
+  createDeviceWizard,
+  launchDevice,
+  stopDevice,
+  deleteDevice,
+  UnifiedDevice,
+} from './deviceManager';
+
+// Code Structure
+import { AndroidXmlSymbolProvider, GradleSymbolProvider } from './codeStructure';
+
 
 // UI
 import { 
@@ -429,6 +449,30 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(controlTreeView);
 
+  // Create and register Device Manager TreeView
+  const deviceManagerProvider = new DeviceManagerProvider();
+  const deviceManagerTreeView = vscode.window.createTreeView('deviceManagerView', {
+    treeDataProvider: deviceManagerProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(deviceManagerTreeView);
+
+  // Register Document Symbol Providers for code structure
+  context.subscriptions.push(
+    vscode.languages.registerDocumentSymbolProvider(
+      { language: 'xml', scheme: 'file' },
+      new AndroidXmlSymbolProvider()
+    ),
+    vscode.languages.registerDocumentSymbolProvider(
+      { language: 'gradle', scheme: 'file' },
+      new GradleSymbolProvider()
+    ),
+    vscode.languages.registerDocumentSymbolProvider(
+      { pattern: '**/*.gradle.kts' },
+      new GradleSymbolProvider()
+    )
+  );
+
   // Watch for workspace changes to refresh project tree
   const workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     projectProvider.refresh();
@@ -449,6 +493,35 @@ export function activate(context: vscode.ExtensionContext): void {
       if (item.data.resourceUri) {
         vscode.commands.executeCommand('revealInExplorer', item.data.resourceUri);
       }
+    }),
+
+    // Android Creation commands
+    vscode.commands.registerCommand('android-toolkit.createResource', (item?: ProjectTreeItem) => {
+      createResourceFlow(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.createFolder', (item?: ProjectTreeItem) => {
+      createFolderFlow(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.createAsset', (item?: ProjectTreeItem) => {
+      createAssetFlow(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.createLocale', (item?: ProjectTreeItem) => {
+      createLocaleFlow(item, projectProvider);
+    }),
+
+    // Device Manager commands
+    vscode.commands.registerCommand('android-toolkit.refreshDeviceManager', () => deviceManagerProvider.refresh()),
+    vscode.commands.registerCommand('android-toolkit.createDevice', (platform?: string) => {
+      createDeviceWizard(platform as any, deviceManagerProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.deviceManager.launch', (device: UnifiedDevice) => {
+      launchDevice(device, deviceManagerProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.deviceManager.stop', (device: UnifiedDevice) => {
+      stopDevice(device, deviceManagerProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.deviceManager.delete', (device: UnifiedDevice) => {
+      deleteDevice(device, deviceManagerProvider);
     }),
 
     // Emulator Control commands

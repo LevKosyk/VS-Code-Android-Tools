@@ -21,6 +21,7 @@ export type CategoryId =
   | 'manifests'
   | 'java'
   | 'res'
+  | 'assets'
   | 'gradle';
 
 /**
@@ -69,6 +70,13 @@ export const CATEGORY_CONFIGS: CategoryConfig[] = [
     icon: 'file-media',
     patterns: ['**/*'],
     rootPaths: ['app/src/main/res', 'src/main/res'],
+  },
+  {
+    id: 'assets',
+    label: 'Assets',
+    icon: 'file-binary',
+    patterns: ['**/*'],
+    rootPaths: ['app/src/main/assets', 'src/main/assets'],
   },
   {
     id: 'gradle',

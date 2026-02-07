@@ -1,14 +1,18 @@
 /**
  * Android Project Tree Item
  * VS Code TreeItem implementation for project nodes
+ * 
+ * Icon Strategy:
+ * - Files/folders with resourceUri: Let VS Code resolve icons from user's active theme
+ * - Virtual nodes (root, category): Use semantic ThemeIcon identifiers
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { ProjectNodeType, CategoryId, ProjectNodeData, CATEGORY_CONFIGS } from './types';
 
 /**
  * Tree item for Android Project View
+ * Icons are resolved by VS Code's theme system when resourceUri is set
  */
 export class ProjectTreeItem extends vscode.TreeItem {
   public readonly data: ProjectNodeData;
@@ -18,46 +22,82 @@ export class ProjectTreeItem extends vscode.TreeItem {
     collapsibleState: vscode.TreeItemCollapsibleState,
     children?: ProjectTreeItem[]
   ) {
-    super(data.label, collapsibleState);
+    // For items with resourceUri, pass the URI to TreeItem constructor
+    // This enables VS Code's native file/folder icon resolution
+    if (data.resourceUri) {
+      super(data.resourceUri, collapsibleState);
+      this.label = data.label;
+    } else {
+      super(data.label, collapsibleState);
+    }
 
     this.data = data;
     this.description = data.description;
     this.tooltip = this.createTooltip();
-    this.contextValue = data.type;
+    this.contextValue = this.getContextValue();
 
-    // Set icon based on node type
-    this.iconPath = this.getIcon();
-
-    // Set command for clickable items
+    // Set resourceUri for file explorer features
     if (data.resourceUri) {
       this.resourceUri = data.resourceUri;
-      
-      if (data.type === 'file') {
-        this.command = {
-          command: 'vscode.open',
-          title: 'Open File',
-          arguments: [data.resourceUri],
-        };
-      }
+    }
+
+    // Only set iconPath for virtual nodes (root, category)
+    // For file/folder nodes, VS Code will resolve icons from resourceUri
+    if (!data.resourceUri) {
+      this.iconPath = this.getVirtualNodeIcon();
+    }
+
+    // Set command for file items to open on click
+    if (data.type === 'file' && data.resourceUri) {
+      this.command = {
+        command: 'vscode.open',
+        title: 'Open File',
+        arguments: [data.resourceUri],
+      };
     }
   }
 
   /**
-   * Get icon for this node
+   * Get context value for menu contributions
+   * Context value determines which context menus are shown
    */
-  private getIcon(): vscode.ThemeIcon | undefined {
+  private getContextValue(): string {
+    // Add category-specific context for targeted menu items
+    if (this.data.type === 'category' && this.data.categoryId) {
+      return `category-${this.data.categoryId}`;
+    }
+    
+    // Add folder type context for res subfolders
+    if (this.data.type === 'folder' && this.data.resourceUri) {
+      const folderName = this.data.label.toLowerCase();
+      if (this.isResourceFolder(folderName)) {
+        return `folder-res-${folderName.split('-')[0]}`;
+      }
+      return 'folder';
+    }
+    
+    return this.data.type;
+  }
+
+  /**
+   * Check if folder name is a resource folder type
+   */
+  private isResourceFolder(name: string): boolean {
+    const resTypes = ['drawable', 'layout', 'values', 'mipmap', 'raw', 'xml', 'anim', 'menu', 'color', 'font'];
+    return resTypes.some(type => name === type || name.startsWith(`${type}-`));
+  }
+
+  /**
+   * Get icon for virtual nodes (root, category)
+   * These don't have resourceUri so we use ThemeIcon
+   */
+  private getVirtualNodeIcon(): vscode.ThemeIcon | undefined {
     switch (this.data.type) {
       case 'root':
         return new vscode.ThemeIcon('folder-library');
       
       case 'category':
         return this.getCategoryIcon();
-      
-      case 'folder':
-        return new vscode.ThemeIcon('folder');
-      
-      case 'file':
-        return this.getFileIcon();
       
       default:
         return undefined;
@@ -68,8 +108,6 @@ export class ProjectTreeItem extends vscode.TreeItem {
    * Get icon for category nodes
    */
   private getCategoryIcon(): vscode.ThemeIcon {
-    const config = CATEGORY_CONFIGS.find(c => c.id === this.data.categoryId);
-    
     switch (this.data.categoryId) {
       case 'manifests':
         return new vscode.ThemeIcon('symbol-file');
@@ -77,43 +115,13 @@ export class ProjectTreeItem extends vscode.TreeItem {
         return new vscode.ThemeIcon('symbol-class');
       case 'res':
         return new vscode.ThemeIcon('file-media');
+      case 'assets':
+        return new vscode.ThemeIcon('file-binary');
       case 'gradle':
         return new vscode.ThemeIcon('gear');
       default:
+        const config = CATEGORY_CONFIGS.find(c => c.id === this.data.categoryId);
         return new vscode.ThemeIcon(config?.icon || 'folder');
-    }
-  }
-
-  /**
-   * Get icon for file nodes based on extension
-   */
-  private getFileIcon(): vscode.ThemeIcon {
-    if (!this.data.resourceUri) {
-      return new vscode.ThemeIcon('file');
-    }
-
-    const ext = path.extname(this.data.resourceUri.fsPath).toLowerCase();
-
-    switch (ext) {
-      case '.xml':
-        return new vscode.ThemeIcon('code');
-      case '.java':
-        return new vscode.ThemeIcon('symbol-class');
-      case '.kt':
-        return new vscode.ThemeIcon('symbol-class');
-      case '.gradle':
-      case '.kts':
-        return new vscode.ThemeIcon('gear');
-      case '.png':
-      case '.jpg':
-      case '.jpeg':
-      case '.webp':
-      case '.svg':
-        return new vscode.ThemeIcon('file-media');
-      case '.properties':
-        return new vscode.ThemeIcon('settings-gear');
-      default:
-        return new vscode.ThemeIcon('file');
     }
   }
 
@@ -146,6 +154,8 @@ export class ProjectTreeItem extends vscode.TreeItem {
         return 'Java and Kotlin source files';
       case 'res':
         return 'Android resources (layouts, drawables, values, etc.)';
+      case 'assets':
+        return 'Raw asset files';
       case 'gradle':
         return 'Gradle build configuration files';
       default:

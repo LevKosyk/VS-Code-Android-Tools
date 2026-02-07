@@ -33,6 +33,12 @@
           "contextualTitle": "Android Project"
         },
         {
+          "id": "deviceManagerView",
+          "name": "Device Manager",
+          "icon": "$(device-mobile)",
+          "contextualTitle": "Device Manager"
+        },
+        {
           "id": "emulatorControlView",
           "name": "Emulator Control",
           "icon": "$(vm)",
@@ -122,6 +128,51 @@
       {
         "command": "android-toolkit.debugStatus",
         "title": "Android: Debug Status"
+      },
+      {
+        "command": "android-toolkit.createResource",
+        "title": "Android: Create Resource",
+        "icon": "$(add)"
+      },
+      {
+        "command": "android-toolkit.createFolder",
+        "title": "Android: Create Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "android-toolkit.createAsset",
+        "title": "Android: Create Asset",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "android-toolkit.createLocale",
+        "title": "Android: Create Language/Locale",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "android-toolkit.createDevice",
+        "title": "Mobile: Create Device",
+        "icon": "$(add)"
+      },
+      {
+        "command": "android-toolkit.refreshDeviceManager",
+        "title": "Mobile: Refresh Device Manager",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.deviceManager.launch",
+        "title": "Launch Device",
+        "icon": "$(play)"
+      },
+      {
+        "command": "android-toolkit.deviceManager.stop",
+        "title": "Stop Device",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "android-toolkit.deviceManager.delete",
+        "title": "Delete Device",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -129,7 +180,22 @@
         {
           "command": "android-toolkit.refreshProjectView",
           "when": "view == androidProjectView",
-          "group": "navigation"
+          "group": "navigation@2"
+        },
+        {
+          "command": "android-toolkit.createResource",
+          "when": "view == androidProjectView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "android-toolkit.refreshDeviceManager",
+          "when": "view == deviceManagerView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "android-toolkit.createDevice",
+          "when": "view == deviceManagerView",
+          "group": "navigation@1"
         },
         {
           "command": "android-toolkit.refreshEmulatorControl",
@@ -142,6 +208,26 @@
           "command": "android-toolkit.openInExplorer",
           "when": "view == androidProjectView && viewItem =~ /folder|file/",
           "group": "navigation"
+        },
+        {
+          "command": "android-toolkit.createResource",
+          "when": "view == androidProjectView && viewItem =~ /category-res|folder-res/",
+          "group": "1_create@1"
+        },
+        {
+          "command": "android-toolkit.createFolder",
+          "when": "view == androidProjectView && viewItem =~ /category-res|folder-res/",
+          "group": "1_create@2"
+        },
+        {
+          "command": "android-toolkit.createLocale",
+          "when": "view == androidProjectView && viewItem =~ /category-res|folder-res/",
+          "group": "1_create@3"
+        },
+        {
+          "command": "android-toolkit.createAsset",
+          "when": "view == androidProjectView && viewItem == category-assets",
+          "group": "1_create@1"
         }
       ]
     }
