@@ -1,80 +1,51 @@
-/**
- * Emulator Control Panel
- * Webview-based panel for advanced emulator control
- */
-
 import * as vscode from 'vscode';
-import { AdbService, EmulatorService, EmulatorInfo, DEFAULT_LOCATION_PRESETS, NetworkProfile } from '../services';
-
-/**
- * Message types from webview to extension
- */
+import { AdbService, EmulatorService, EmulatorStateService, EmulatorInfo, DEFAULT_LOCATION_PRESETS, NetworkProfile } from '../services';
 interface WebviewMessage {
   type: string;
   deviceId?: string;
   payload?: any;
 }
-
-/**
- * Emulator Control Panel webview
- */
 export class EmulatorControlPanel {
   public static currentPanel: EmulatorControlPanel | undefined;
   private static readonly viewType = 'emulatorControl';
-
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
   private disposables: vscode.Disposable[] = [];
   private selectedDeviceId: string | undefined;
   private refreshInterval: NodeJS.Timeout | undefined;
-
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
     this.extensionUri = extensionUri;
-
     this.panel.webview.html = this.getHtmlContent();
-
-    // Handle messages from webview
     this.panel.webview.onDidReceiveMessage(
       (message: WebviewMessage) => this.handleMessage(message),
       null,
       this.disposables
     );
-
-    // Handle panel disposal
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
-
-    // Handle visibility changes
     this.panel.onDidChangeViewState(
       () => {
         if (this.panel.visible) {
-          this.startRefresh();
-        } else {
-          this.stopRefresh();
+          this.refreshStatus();
         }
       },
       null,
       this.disposables
     );
-
-    // Initial data load
+    const stateService = EmulatorStateService.getInstance();
+    stateService.on('change', (emulators: EmulatorInfo[]) => {
+      this.handleEmulatorChange(emulators);
+    });
     this.refreshEmulators();
-    this.startRefresh();
   }
-
-  /**
-   * Create or show the panel
-   */
   public static createOrShow(extensionUri: vscode.Uri): void {
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
-
     if (EmulatorControlPanel.currentPanel) {
       EmulatorControlPanel.currentPanel.panel.reveal(column);
       return;
     }
-
     const panel = vscode.window.createWebviewPanel(
       EmulatorControlPanel.viewType,
       'Emulator Control',
@@ -85,99 +56,69 @@ export class EmulatorControlPanel {
         localResourceRoots: [extensionUri],
       }
     );
-
     EmulatorControlPanel.currentPanel = new EmulatorControlPanel(panel, extensionUri);
   }
-
-  /**
-   * Start periodic refresh
-   */
-  private startRefresh(): void {
-    this.stopRefresh();
-    this.refreshInterval = setInterval(() => {
-      if (this.selectedDeviceId) {
-        this.refreshStatus();
+  private handleEmulatorChange(emulators: EmulatorInfo[]): void {
+    this.postMessage({ type: 'emulators', data: emulators });
+    const selectedExists = emulators.find(e => e.deviceId === this.selectedDeviceId);
+    if (!this.selectedDeviceId && emulators.length > 0) {
+      this.selectedDeviceId = emulators[0].deviceId;
+      this.refreshStatus();
+    } else if (this.selectedDeviceId && !selectedExists) {
+      if (emulators.length > 0) {
+        this.selectedDeviceId = emulators[0].deviceId;
+      } else {
+        this.selectedDeviceId = undefined;
       }
-    }, 5000);
+      this.refreshStatus();
+    } else if (this.selectedDeviceId) {
+      this.refreshStatus();
+    }
   }
-
-  /**
-   * Stop periodic refresh
-   */
   private stopRefresh(): void {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = undefined;
     }
   }
-
-  /**
-   * Refresh emulator list
-   */
   private async refreshEmulators(): Promise<void> {
     const emulators = await EmulatorService.listRunning();
-    
-    // Only post update if list changed to avoid flickering
-    // Simple check: count and IDs
-    // For now, we trust the webview to handle updates gracefully or we can add a diff check here
-    
-    this.postMessage({ type: 'emulators', data: emulators });
-
-    // Auto-select first if none selected
-    if (!this.selectedDeviceId && emulators.length > 0) {
-      this.selectedDeviceId = emulators[0].deviceId;
-      this.refreshStatus();
+    this.handleEmulatorChange(emulators);
+  }
+  private async refreshStatus(): Promise<void> {
+    if (!this.selectedDeviceId) {
+      this.postMessage({ type: 'status', data: null });
+      return;
+    }
+    try {
+      const status = await EmulatorService.getStatus(this.selectedDeviceId);
+      const isRecording = AdbService.isRecording(this.selectedDeviceId);
+      this.postMessage({ 
+        type: 'status', 
+        data: { ...status, isRecording } 
+      });
+    } catch (error) {
+      console.error('Error refreshing status:', error);
     }
   }
-
-  /**
-   * Refresh status of selected emulator
-   */
-  private async refreshStatus(): Promise<void> {
-    // Also periodically check for new emulators (auto-sync)
-    // This is called by the interval, so we can piggyback or separate it
-    await this.refreshEmulators();
-
-    if (!this.selectedDeviceId) return;
-
-    const status = await EmulatorService.getStatus(this.selectedDeviceId);
-    const isRecording = AdbService.isRecording(this.selectedDeviceId);
-
-    this.postMessage({ 
-      type: 'status', 
-      data: { ...status, isRecording } 
-    });
-  }
-
-  /**
-   * Post message to webview
-   */
   private postMessage(data: any): void {
     this.panel.webview.postMessage(data);
   }
-
-  /**
-   * Handle messages from webview
-   */
   private async handleMessage(message: WebviewMessage): Promise<void> {
     const deviceId = message.deviceId || this.selectedDeviceId;
-    
     if (!deviceId && message.type !== 'refresh' && message.type !== 'selectDevice' && message.type !== 'installApk') {
       vscode.window.showWarningMessage('No emulator selected');
       return;
     }
-
     try {
       switch (message.type) {
         case 'refresh':
           await this.refreshEmulators();
           break;
-
         case 'selectDevice':
           this.selectedDeviceId = message.payload;
           await this.refreshStatus();
           break;
-
         case 'rotate':
           await this.runWithProgress('Rotating screen...', async () => {
             const { rotateScreen } = await import('../emulatorControl/emulatorCommands');
@@ -185,7 +126,6 @@ export class EmulatorControlPanel {
             this.showResult(result);
           });
           break;
-
         case 'screenshot':
           await this.runWithProgress('Taking screenshot...', async () => {
             const { takeScreenshot } = await import('../emulatorControl/emulatorCommands');
@@ -197,7 +137,6 @@ export class EmulatorControlPanel {
             }
           });
           break;
-
         case 'startRecording':
           await this.runWithProgress('Starting recording...', async () => {
             const result = await AdbService.startScreenRecording(deviceId!);
@@ -205,7 +144,6 @@ export class EmulatorControlPanel {
             this.refreshStatus();
           });
           break;
-
         case 'stopRecording':
           await this.runWithProgress('Stopping recording...', async () => {
             const result = await AdbService.stopScreenRecording(deviceId!);
@@ -216,7 +154,6 @@ export class EmulatorControlPanel {
             this.refreshStatus();
           });
           break;
-
         case 'coldBoot':
           await this.runWithProgress('Cold booting...', async () => {
             const { coldBoot } = await import('../emulatorControl/emulatorCommands');
@@ -227,7 +164,6 @@ export class EmulatorControlPanel {
             }
           });
           break;
-
         case 'warmBoot':
           await this.runWithProgress('Warm booting...', async () => {
             const { warmBoot } = await import('../emulatorControl/emulatorCommands');
@@ -238,7 +174,6 @@ export class EmulatorControlPanel {
             }
           });
           break;
-
         case 'wipeData':
           const confirm = await vscode.window.showWarningMessage(
             'Wipe all emulator data? This cannot be undone.',
@@ -256,7 +191,6 @@ export class EmulatorControlPanel {
             });
           }
           break;
-
         case 'installApk':
           const apkUri = await vscode.window.showOpenDialog({
             canSelectFiles: true,
@@ -271,7 +205,6 @@ export class EmulatorControlPanel {
             });
           }
           break;
-
         case 'uninstallApp':
           const packages = await AdbService.listPackages(deviceId!);
           const selected = await vscode.window.showQuickPick(packages, {
@@ -285,7 +218,6 @@ export class EmulatorControlPanel {
             });
           }
           break;
-
         case 'restartApp':
           const allPackages = await AdbService.listPackages(deviceId!);
           const appToRestart = await vscode.window.showQuickPick(allPackages, {
@@ -299,7 +231,6 @@ export class EmulatorControlPanel {
             });
           }
           break;
-
         case 'setLocation':
           const { latitude, longitude } = message.payload;
           await this.runWithProgress('Setting location...', async () => {
@@ -307,7 +238,6 @@ export class EmulatorControlPanel {
             this.showResult(result);
           });
           break;
-
         case 'setLocationPreset':
           const preset = DEFAULT_LOCATION_PRESETS.find(p => p.id === message.payload);
           if (preset) {
@@ -317,7 +247,6 @@ export class EmulatorControlPanel {
             });
           }
           break;
-
         case 'toggleNetwork':
           await this.runWithProgress('Toggling network...', async () => {
             const result = await EmulatorService.toggleNetwork(deviceId!);
@@ -325,7 +254,6 @@ export class EmulatorControlPanel {
             this.refreshStatus();
           });
           break;
-
         case 'setNetworkProfile':
           const profile = message.payload as NetworkProfile;
           await this.runWithProgress('Setting network profile...', async () => {
@@ -333,7 +261,6 @@ export class EmulatorControlPanel {
             this.showResult(result);
           });
           break;
-
         case 'setBattery':
           const { level, status } = message.payload;
           await this.runWithProgress('Setting battery...', async () => {
@@ -347,7 +274,6 @@ export class EmulatorControlPanel {
             vscode.window.showInformationMessage('Battery updated');
           });
           break;
-
       }
     } catch (error) {
       vscode.window.showErrorMessage(
@@ -355,20 +281,12 @@ export class EmulatorControlPanel {
       );
     }
   }
-
-  /**
-   * Run operation with progress indicator
-   */
   private async runWithProgress<T>(title: string, operation: () => Promise<T>): Promise<T> {
     return vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title },
       operation
     );
   }
-
-  /**
-   * Show result notification
-   */
   private showResult(result: { success: boolean; message: string }): void {
     if (result.success) {
       vscode.window.showInformationMessage(result.message);
@@ -376,27 +294,17 @@ export class EmulatorControlPanel {
       vscode.window.showErrorMessage(result.message);
     }
   }
-
-  /**
-   * Dispose panel
-   */
   public dispose(): void {
     EmulatorControlPanel.currentPanel = undefined;
     this.stopRefresh();
     this.panel.dispose();
-
     while (this.disposables.length) {
       const d = this.disposables.pop();
       if (d) d.dispose();
     }
   }
-
-  /**
-   * Generate HTML content for webview
-   */
   private getHtmlContent(): string {
     const nonce = this.getNonce();
-
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -444,6 +352,10 @@ export class EmulatorControlPanel {
     .status-indicator.running {
       background: rgba(40, 167, 69, 0.15);
       color: #28a745;
+    }
+    .status-indicator.booting {
+      background: rgba(255, 193, 7, 0.15);
+      color: #ffc107;
     }
     .status-indicator.offline {
       background: rgba(220, 53, 69, 0.15);
@@ -617,7 +529,6 @@ export class EmulatorControlPanel {
       <h3>No Running Emulators</h3>
       <p>Start an emulator to use these controls</p>
     </div>
-    
     <div id="controlPanel" style="display: none;">
       <!-- Header -->
       <div class="header">
@@ -628,7 +539,6 @@ export class EmulatorControlPanel {
         </span>
         <button class="icon-btn" onclick="refresh()" title="Refresh">↻</button>
       </div>
-
       <!-- Device Info -->
       <div class="section">
         <div class="section-title">Device Info</div>
@@ -641,7 +551,6 @@ export class EmulatorControlPanel {
           <div class="info-item"><div class="info-label">Battery</div><div class="info-value" id="infoBat">-</div></div>
         </div>
       </div>
-
       <!-- Screen Controls -->
       <div class="section">
         <div class="section-title">Screen</div>
@@ -651,7 +560,6 @@ export class EmulatorControlPanel {
           <button class="btn" id="recordBtn" onclick="toggleRecording()">Record</button>
         </div>
       </div>
-
       <!-- Actions -->
       <div class="section">
         <div class="section-title">Actions</div>
@@ -661,7 +569,6 @@ export class EmulatorControlPanel {
           <button class="btn danger" onclick="send('wipeData')">Wipe Data</button>
         </div>
       </div>
-
       <!-- App Management -->
       <div class="section">
         <div class="section-title">App Management</div>
@@ -671,7 +578,6 @@ export class EmulatorControlPanel {
           <button class="btn" onclick="send('restartApp')">Restart App</button>
         </div>
       </div>
-
       <!-- Location -->
       <div class="section">
         <div class="section-title">Location</div>
@@ -687,7 +593,6 @@ export class EmulatorControlPanel {
           <button class="btn" onclick="send('setLocationPreset', 'tokyo')">Tokyo</button>
         </div>
       </div>
-
       <!-- Network -->
       <div class="section">
         <div class="section-title">Network</div>
@@ -703,9 +608,6 @@ export class EmulatorControlPanel {
           </select>
         </div>
       </div>
-
-
-
       <!-- Battery -->
       <div class="section">
         <div class="section-title">Battery Simulation</div>
@@ -723,21 +625,17 @@ export class EmulatorControlPanel {
       </div>
     </div>
   </div>
-
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     let emulators = [];
     let selectedDeviceId = null;
     let isRecording = false;
-
     function send(type, payload) {
       vscode.postMessage({ type, deviceId: selectedDeviceId, payload });
     }
-
     function refresh() {
       send('refresh');
     }
-
     function setLocation() {
       const lat = parseFloat(document.getElementById('latitude').value);
       const lng = parseFloat(document.getElementById('longitude').value);
@@ -745,27 +643,19 @@ export class EmulatorControlPanel {
         send('setLocation', { latitude: lat, longitude: lng });
       }
     }
-
     function setNetworkProfile() {
       const profile = document.getElementById('networkProfile').value;
       send('setNetworkProfile', profile);
     }
-
     function setBattery() {
       const level = parseInt(document.getElementById('batteryLevel').value);
       const status = document.getElementById('batteryStatus').value;
       send('setBattery', { level: level, status: status });
     }
-
     function updateBatteryDisplay() {
       const val = document.getElementById('batteryLevel').value;
       document.getElementById('batteryValue').textContent = val + '%';
     }
-
-
-
-
-
     function toggleRecording() {
       if (isRecording) {
         send('stopRecording');
@@ -773,34 +663,30 @@ export class EmulatorControlPanel {
         send('startRecording');
       }
     }
-
     function updateUI() {
       const empty = document.getElementById('emptyState');
       const panel = document.getElementById('controlPanel');
-      
       if (emulators.length === 0) {
         empty.style.display = 'block';
         panel.style.display = 'none';
       } else {
         empty.style.display = 'none';
         panel.style.display = 'block';
-        
         const select = document.getElementById('deviceSelect');
-        select.innerHTML = emulators.map(e => 
-          '<option value="' + e.deviceId + '"' + (e.deviceId === selectedDeviceId ? ' selected' : '') + '>' + 
-          e.avdName + '</option>'
-        ).join('');
+        select.innerHTML = emulators.map(e => {
+          const isBooting = e.state === 'booting';
+          const label = e.avdName + (isBooting ? ' (Booting...)' : '');
+          return '<option value="' + e.deviceId + '"' + (e.deviceId === selectedDeviceId ? ' selected' : '') + '>' + 
+            label + '</option>';
+        }).join('');
       }
     }
-
     document.getElementById('deviceSelect').addEventListener('change', (e) => {
       selectedDeviceId = e.target.value;
       send('selectDevice', selectedDeviceId);
     });
-
     window.addEventListener('message', (event) => {
       const msg = event.data;
-      
       if (msg.type === 'emulators') {
         emulators = msg.data || [];
         if (emulators.length > 0 && !selectedDeviceId) {
@@ -808,17 +694,37 @@ export class EmulatorControlPanel {
         }
         updateUI();
       }
-      
       if (msg.type === 'status' && msg.data) {
         const d = msg.data;
         document.getElementById('infoAndroid').textContent = d.avdName || '-';
         document.getElementById('infoMem').textContent = d.memory ? d.memory.usedPercent + '% used' : '-';
         document.getElementById('infoBat').textContent = d.battery ? d.battery.level + '%' : '-';
-        
         const indicator = document.getElementById('statusIndicator');
         indicator.className = 'status-indicator ' + d.state;
-        document.getElementById('statusText').textContent = d.state === 'running' ? 'Running' : 'Offline';
-
+        let statusText = 'Unknown';
+        if (d.state === 'running') statusText = 'Running';
+        else if (d.state === 'booting') statusText = 'Booting...';
+        else statusText = 'Offline';
+        document.getElementById('statusText').textContent = statusText;
+        // Disable/Enable buttons based on state
+        const isBooting = d.state === 'booting';
+        const btns = document.querySelectorAll('.btn:not(.danger)'); // Keep wipe data enabled? Maybe not.
+        btns.forEach(b => {
+             // specific logic could go here, for now disable most non-essential
+             if (b.id !== 'networkToggle') { // example exception
+                 (b as HTMLButtonElement).disabled = isBooting;
+             }
+        });
+        // Simpler approach: disable all action buttons if booting
+        const actions = document.querySelectorAll('.btn');
+        actions.forEach(b => {
+             // Allow cold/warm boot and wipe data even if booting (recovery)
+             // context dependent, but safe to disable most
+             const text = b.textContent;
+             if (text !== 'Cold Boot' && text !== 'Warm Boot' && text !== 'Wipe Data') {
+                 (b as HTMLButtonElement).disabled = isBooting;
+             }
+        });
         isRecording = d.isRecording || false;
         const recordBtn = document.getElementById('recordBtn');
         recordBtn.textContent = isRecording ? 'Stop Recording' : 'Record';
@@ -829,7 +735,6 @@ export class EmulatorControlPanel {
 </body>
 </html>`;
   }
-
   private getNonce(): string {
     let text = '';
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

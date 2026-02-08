@@ -1,56 +1,34 @@
-/**
- * Logcat Webview Panel
- * VS Code Webview for displaying live logcat output
- */
-
 import * as vscode from 'vscode';
 import { LogcatStream, logcatManager } from './logcatStream';
 import { LogEntry, LogFilter, LogLevel, LOG_LEVEL_NAMES, DEFAULT_FILTER } from './types';
 import { listDevices } from '../devices/deviceManager';
-
-/**
- * Logcat panel manager
- */
 export class LogcatPanel {
   public static currentPanel: LogcatPanel | undefined;
   private static readonly viewType = 'androidLogcat';
-
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
   private stream: LogcatStream | null = null;
   private filter: LogFilter = { ...DEFAULT_FILTER };
   private disposables: vscode.Disposable[] = [];
-
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
     this.extensionUri = extensionUri;
-
     this.panel.webview.html = this.getHtmlContent();
-
-    // Handle messages from webview
     this.panel.webview.onDidReceiveMessage(
       message => this.handleMessage(message),
       null,
       this.disposables
     );
-
-    // Handle panel disposal
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
   }
-
-  /**
-   * Create or show the logcat panel
-   */
   public static createOrShow(extensionUri: vscode.Uri): LogcatPanel {
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
-
     if (LogcatPanel.currentPanel) {
       LogcatPanel.currentPanel.panel.reveal(column);
       return LogcatPanel.currentPanel;
     }
-
     const panel = vscode.window.createWebviewPanel(
       LogcatPanel.viewType,
       'Logcat Viewer',
@@ -60,46 +38,32 @@ export class LogcatPanel {
         retainContextWhenHidden: true,
       }
     );
-
     LogcatPanel.currentPanel = new LogcatPanel(panel, extensionUri);
     return LogcatPanel.currentPanel;
   }
-
-  /**
-   * Handle messages from webview
-   */
   private async handleMessage(message: { type: string; [key: string]: unknown }): Promise<void> {
     switch (message.type) {
       case 'getDevices':
         await this.sendDeviceList();
         break;
-
       case 'startStream':
         await this.startStream(message.deviceId as string);
         break;
-
       case 'stopStream':
         this.stopStream();
         break;
-
       case 'setFilter':
         this.setFilter(message.filter as LogFilter);
         break;
-
       case 'clear':
         this.clearLogs();
         break;
-
       case 'copyLine':
         await vscode.env.clipboard.writeText(message.text as string);
         vscode.window.showInformationMessage('Log line copied to clipboard');
         break;
     }
   }
-
-  /**
-   * Send device list to webview
-   */
   private async sendDeviceList(): Promise<void> {
     try {
       const devices = await listDevices();
@@ -118,55 +82,33 @@ export class LogcatPanel {
       });
     }
   }
-
-  /**
-   * Start logcat stream for device
-   */
   private async startStream(deviceId: string): Promise<void> {
-    // Stop existing stream
     this.stopStream();
-
     this.stream = logcatManager.getStream(deviceId);
     this.stream.setFilter(this.filter);
-
-    // Handle new entries
     this.stream.on('entry', (entry: LogEntry) => {
       this.postMessage({
         type: 'entry',
         entry: this.serializeEntry(entry),
       });
     });
-
-    // Handle state changes
     this.stream.on('state', (state) => {
       this.postMessage({ type: 'state', state });
     });
-
-    // Handle errors
     this.stream.on('error', (message) => {
       this.postMessage({ type: 'error', message });
       vscode.window.showErrorMessage(`Logcat: ${message}`);
     });
-
-    // Handle clear
     this.stream.on('cleared', () => {
       this.postMessage({ type: 'cleared' });
     });
-
-    // Start the stream
     this.stream.start();
-
-    // Send existing filtered entries
     const existingEntries = this.stream.getFilteredEntries();
     this.postMessage({
       type: 'entries',
       entries: existingEntries.map(e => this.serializeEntry(e)),
     });
   }
-
-  /**
-   * Stop current stream
-   */
   private stopStream(): void {
     if (this.stream) {
       this.stream.removeAllListeners();
@@ -174,15 +116,10 @@ export class LogcatPanel {
       this.stream = null;
     }
   }
-
-  /**
-   * Update filter settings
-   */
   private setFilter(filter: LogFilter): void {
     this.filter = filter;
     if (this.stream) {
       this.stream.setFilter(filter);
-      // Re-send filtered entries
       const entries = this.stream.getFilteredEntries();
       this.postMessage({
         type: 'entries',
@@ -190,19 +127,11 @@ export class LogcatPanel {
       });
     }
   }
-
-  /**
-   * Clear logs
-   */
   private clearLogs(): void {
     if (this.stream) {
       this.stream.clear();
     }
   }
-
-  /**
-   * Serialize entry for webview
-   */
   private serializeEntry(entry: LogEntry): object {
     return {
       id: entry.id,
@@ -213,17 +142,9 @@ export class LogcatPanel {
       message: entry.message,
     };
   }
-
-  /**
-   * Post message to webview
-   */
   private postMessage(message: object): void {
     this.panel.webview.postMessage(message);
   }
-
-  /**
-   * Get HTML content for webview
-   */
   private getHtmlContent(): string {
     return `<!DOCTYPE html>
 <html lang="en">
@@ -241,9 +162,7 @@ export class LogcatPanel {
       --btn-bg: var(--vscode-button-background);
       --btn-fg: var(--vscode-button-foreground);
     }
-
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: var(--vscode-font-family);
       font-size: 13px;
@@ -253,7 +172,6 @@ export class LogcatPanel {
       display: flex;
       flex-direction: column;
     }
-
     .toolbar {
       display: flex;
       gap: 8px;
@@ -262,7 +180,6 @@ export class LogcatPanel {
       flex-wrap: wrap;
       align-items: center;
     }
-
     select, input, button {
       font-family: inherit;
       font-size: 12px;
@@ -272,31 +189,24 @@ export class LogcatPanel {
       background: var(--input-bg);
       color: var(--input-fg);
     }
-
     button {
       background: var(--btn-bg);
       color: var(--btn-fg);
       cursor: pointer;
       border: none;
     }
-
     button:hover { opacity: 0.9; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-
     .btn-stop { background: #d32f2f; }
     .btn-clear { background: #616161; }
-
     input[type="text"] { width: 150px; }
-
     .status {
       margin-left: auto;
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
     }
-
     .status.running { color: #4caf50; }
     .status.error { color: #f44336; }
-
     .log-container {
       flex: 1;
       overflow-y: auto;
@@ -304,28 +214,23 @@ export class LogcatPanel {
       font-size: 12px;
       padding: 4px;
     }
-
     .log-line {
       display: flex;
       padding: 2px 4px;
       border-radius: 2px;
       cursor: pointer;
     }
-
     .log-line:hover { background: var(--vscode-list-hoverBackground); }
-
     .log-time { color: #888; width: 85px; flex-shrink: 0; }
     .log-level { width: 18px; flex-shrink: 0; font-weight: bold; text-align: center; }
     .log-tag { color: #4FC3F7; width: 120px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
     .log-msg { flex: 1; white-space: pre-wrap; word-break: break-all; }
-
     .level-V { color: #888888; }
     .level-D { color: #4FC3F7; }
     .level-I { color: #81C784; }
     .level-W { color: #FFB74D; }
     .level-E { color: #E57373; }
     .level-F { color: #F44336; }
-
     .empty-state {
       display: flex;
       align-items: center;
@@ -343,7 +248,6 @@ export class LogcatPanel {
     <button id="startBtn">Start</button>
     <button id="stopBtn" class="btn-stop" disabled>Stop</button>
     <button id="clearBtn" class="btn-clear">Clear</button>
-
     <select id="levelSelect">
       <option value="V">Verbose+</option>
       <option value="D">Debug+</option>
@@ -351,20 +255,15 @@ export class LogcatPanel {
       <option value="W">Warning+</option>
       <option value="E">Error+</option>
     </select>
-
     <input type="text" id="tagFilter" placeholder="Filter by tag...">
     <input type="text" id="searchFilter" placeholder="Search...">
-
     <span id="status" class="status">Stopped</span>
   </div>
-
   <div class="log-container" id="logContainer">
     <div class="empty-state">Select a device and click Start to view logs</div>
   </div>
-
   <script>
     const vscode = acquireVsCodeApi();
-
     // Elements
     const deviceSelect = document.getElementById('deviceSelect');
     const startBtn = document.getElementById('startBtn');
@@ -375,13 +274,10 @@ export class LogcatPanel {
     const searchFilter = document.getElementById('searchFilter');
     const statusEl = document.getElementById('status');
     const logContainer = document.getElementById('logContainer');
-
     let isRunning = false;
     let autoScroll = true;
-
     // Request device list on load
     vscode.postMessage({ type: 'getDevices' });
-
     // Event listeners
     startBtn.addEventListener('click', () => {
       const deviceId = deviceSelect.value;
@@ -389,32 +285,26 @@ export class LogcatPanel {
         vscode.postMessage({ type: 'startStream', deviceId });
       }
     });
-
     stopBtn.addEventListener('click', () => {
       vscode.postMessage({ type: 'stopStream' });
     });
-
     clearBtn.addEventListener('click', () => {
       vscode.postMessage({ type: 'clear' });
       logContainer.innerHTML = '';
     });
-
     levelSelect.addEventListener('change', sendFilter);
     tagFilter.addEventListener('input', debounce(sendFilter, 300));
     searchFilter.addEventListener('input', debounce(sendFilter, 300));
-
     logContainer.addEventListener('scroll', () => {
       const { scrollTop, scrollHeight, clientHeight } = logContainer;
       autoScroll = scrollHeight - scrollTop - clientHeight < 50;
     });
-
     logContainer.addEventListener('dblclick', (e) => {
       const line = e.target.closest('.log-line');
       if (line) {
         vscode.postMessage({ type: 'copyLine', text: line.dataset.raw });
       }
     });
-
     function sendFilter() {
       vscode.postMessage({
         type: 'setFilter',
@@ -425,7 +315,6 @@ export class LogcatPanel {
         }
       });
     }
-
     function debounce(fn, ms) {
       let timeout;
       return (...args) => {
@@ -433,11 +322,9 @@ export class LogcatPanel {
         timeout = setTimeout(() => fn(...args), ms);
       };
     }
-
     // Handle messages from extension
     window.addEventListener('message', (event) => {
       const message = event.data;
-
       switch (message.type) {
         case 'devices':
           deviceSelect.innerHTML = '<option value="">Select device...</option>';
@@ -449,7 +336,6 @@ export class LogcatPanel {
             deviceSelect.appendChild(opt);
           });
           break;
-
         case 'state':
           isRunning = message.state === 'running';
           startBtn.disabled = isRunning;
@@ -458,26 +344,21 @@ export class LogcatPanel {
           statusEl.textContent = message.state.charAt(0).toUpperCase() + message.state.slice(1);
           statusEl.className = 'status ' + message.state;
           break;
-
         case 'entry':
           appendEntry(message.entry);
           break;
-
         case 'entries':
           logContainer.innerHTML = '';
           message.entries.forEach(appendEntry);
           break;
-
         case 'cleared':
           logContainer.innerHTML = '';
           break;
-
         case 'error':
           console.error('Logcat error:', message.message);
           break;
       }
     });
-
     function appendEntry(entry) {
       const div = document.createElement('div');
       div.className = 'log-line';
@@ -487,14 +368,11 @@ export class LogcatPanel {
         '<span class="log-level level-' + entry.level + '">' + entry.level + '</span>' +
         '<span class="log-tag" title="' + escapeHtml(entry.tag) + '">' + escapeHtml(entry.tag) + '</span>' +
         '<span class="log-msg">' + escapeHtml(entry.message) + '</span>';
-      
       logContainer.appendChild(div);
-
       if (autoScroll) {
         div.scrollIntoView({ behavior: 'auto' });
       }
     }
-
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
@@ -504,15 +382,10 @@ export class LogcatPanel {
 </body>
 </html>`;
   }
-
-  /**
-   * Dispose the panel
-   */
   public dispose(): void {
     LogcatPanel.currentPanel = undefined;
     this.stopStream();
     this.panel.dispose();
-
     while (this.disposables.length) {
       const disposable = this.disposables.pop();
       if (disposable) {

@@ -1,14 +1,9 @@
-/**
- * Performance Profiler Types
- */
-
 export interface CpuSnapshot {
   timestamp: number;
   totalCpu: number;
   processCpu: number;
   threads: number;
 }
-
 export interface MemorySnapshot {
   timestamp: number;
   javaHeap: {
@@ -21,7 +16,6 @@ export interface MemorySnapshot {
   };
   totalPss: number;
 }
-
 export interface GraphicsStats {
   timestamp: number;
   totalFrames: number;
@@ -30,14 +24,12 @@ export interface GraphicsStats {
   percentile95: number;
   percentile99: number;
 }
-
 export interface StartupStats {
   timestamp: number;
   type: 'cold' | 'warm' | 'hot';
   totalTime: number;
   waitTime: number;
 }
-
 export interface ProfilerResult<T> {
   success: boolean;
   message: string;

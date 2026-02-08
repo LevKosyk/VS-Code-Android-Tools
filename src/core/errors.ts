@@ -1,35 +1,19 @@
-/**
- * Custom error types for Android Toolkit
- * Each error includes actionable guidance for users
- */
-
-/**
- * Base error class for Android Toolkit
- */
-export class AndroidToolkitError extends Error {
+export class AndroidToolsError extends Error {
   constructor(
     message: string,
     public readonly userMessage: string,
     public readonly suggestion?: string
   ) {
     super(message);
-    this.name = 'AndroidToolkitError';
+    this.name = 'AndroidToolsError';
   }
-
-  /**
-   * Format error for VS Code notification
-   */
   toNotification(): string {
     return this.suggestion
       ? `${this.userMessage}\n\n${this.suggestion}`
       : this.userMessage;
   }
 }
-
-/**
- * Android SDK not found or invalid
- */
-export class SdkNotFoundError extends AndroidToolkitError {
+export class SdkNotFoundError extends AndroidToolsError {
   constructor(searchedPaths: string[]) {
     const paths = searchedPaths.join(', ');
     super(
@@ -40,11 +24,7 @@ export class SdkNotFoundError extends AndroidToolkitError {
     this.name = 'SdkNotFoundError';
   }
 }
-
-/**
- * ADB command execution failed
- */
-export class AdbError extends AndroidToolkitError {
+export class AdbError extends AndroidToolsError {
   constructor(
     command: string,
     public readonly stderr: string,
@@ -58,11 +38,7 @@ export class AdbError extends AndroidToolkitError {
     this.name = 'AdbError';
   }
 }
-
-/**
- * Emulator-related errors
- */
-export class EmulatorError extends AndroidToolkitError {
+export class EmulatorError extends AndroidToolsError {
   constructor(
     message: string,
     userMessage: string,
@@ -71,7 +47,6 @@ export class EmulatorError extends AndroidToolkitError {
     super(message, userMessage, suggestion);
     this.name = 'EmulatorError';
   }
-
   static notFound(avdName: string): EmulatorError {
     return new EmulatorError(
       `AVD not found: ${avdName}`,
@@ -79,7 +54,6 @@ export class EmulatorError extends AndroidToolkitError {
       'Run "Android: Create Emulator" to create a new AVD.'
     );
   }
-
   static alreadyRunning(avdName: string): EmulatorError {
     return new EmulatorError(
       `AVD already running: ${avdName}`,
@@ -87,7 +61,6 @@ export class EmulatorError extends AndroidToolkitError {
       'Use "Android: Stop Emulator" first if you want to restart it.'
     );
   }
-
   static bootTimeout(avdName: string): EmulatorError {
     return new EmulatorError(
       `Boot timeout for AVD: ${avdName}`,
@@ -95,7 +68,6 @@ export class EmulatorError extends AndroidToolkitError {
       'The emulator may still be starting. Check the emulator window.'
     );
   }
-
   static noSystemImages(): EmulatorError {
     return new EmulatorError(
       'No system images available',
@@ -103,7 +75,6 @@ export class EmulatorError extends AndroidToolkitError {
       'Install system images using Android SDK Manager:\nsdkmanager "system-images;android-34;google_apis;x86_64"'
     );
   }
-
   static creationFailed(name: string, stderr: string): EmulatorError {
     return new EmulatorError(
       `Failed to create AVD: ${name}`,
@@ -112,11 +83,7 @@ export class EmulatorError extends AndroidToolkitError {
     );
   }
 }
-
-/**
- * AVD Manager command failed
- */
-export class AvdManagerError extends AndroidToolkitError {
+export class AvdManagerError extends AndroidToolsError {
   constructor(
     command: string,
     public readonly stderr: string

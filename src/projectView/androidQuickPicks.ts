@@ -1,8 +1,3 @@
-/**
- * Android Quick Picks
- * VS Code QuickPick dialogs for Android resource creation
- */
-
 import * as vscode from 'vscode';
 import {
   validateResourceName,
@@ -13,17 +8,9 @@ import {
   COMMON_LOCALES,
   ResourceFolderType,
 } from './androidValidation';
-
-/**
- * Android resource type with description
- */
 interface ResourceTypeItem extends vscode.QuickPickItem {
   type: ResourceFolderType;
 }
-
-/**
- * Resource type configurations for quick pick
- */
 const RESOURCE_TYPE_CONFIGS: ResourceTypeItem[] = [
   {
     type: 'layout',
@@ -98,10 +85,6 @@ const RESOURCE_TYPE_CONFIGS: ResourceTypeItem[] = [
     detail: 'Jetpack Navigation component graphs',
   },
 ];
-
-/**
- * Pick a resource type from available options
- */
 export async function pickResourceType(): Promise<ResourceFolderType | undefined> {
   const selected = await vscode.window.showQuickPick(RESOURCE_TYPE_CONFIGS, {
     title: 'Select Resource Type',
@@ -109,23 +92,14 @@ export async function pickResourceType(): Promise<ResourceFolderType | undefined
     matchOnDescription: true,
     matchOnDetail: true,
   });
-
   return selected?.type;
 }
-
-/**
- * Input options for name input
- */
 interface InputNameOptions {
   title?: string;
   prompt?: string;
   placeholder?: string;
   defaultValue?: string;
 }
-
-/**
- * Input a resource file name with validation
- */
 export async function inputResourceName(
   options: InputNameOptions = {}
 ): Promise<string | undefined> {
@@ -146,13 +120,8 @@ export async function inputResourceName(
       return undefined;
     },
   });
-
   return name?.trim();
 }
-
-/**
- * Input a folder name with validation
- */
 export async function inputFolderName(
   options: InputNameOptions = {}
 ): Promise<string | undefined> {
@@ -173,54 +142,35 @@ export async function inputFolderName(
       return undefined;
     },
   });
-
   return name?.trim().toLowerCase();
 }
-
-/**
- * Locale item for quick pick
- */
 interface LocaleItem extends vscode.QuickPickItem {
   code: string;
 }
-
-/**
- * Pick a locale from common options or enter custom
- */
 export async function pickLocale(): Promise<string | undefined> {
   const items: LocaleItem[] = COMMON_LOCALES.map(locale => ({
     label: locale.name,
     description: locale.code,
     code: locale.code,
   }));
-
-  // Add custom option at the top
   const customOption: LocaleItem = {
     label: '$(edit) Custom Locale...',
     description: 'Enter a custom locale code',
     code: '__custom__',
   };
-
   const selected = await vscode.window.showQuickPick([customOption, ...items], {
     title: 'Select Language/Locale',
     placeHolder: 'Choose a language or enter custom locale',
     matchOnDescription: true,
   });
-
   if (!selected) {
     return undefined;
   }
-
   if (selected.code === '__custom__') {
     return inputCustomLocale();
   }
-
   return selected.code;
 }
-
-/**
- * Input a custom locale code with validation
- */
 async function inputCustomLocale(): Promise<string | undefined> {
   const locale = await vscode.window.showInputBox({
     title: 'Custom Locale',
@@ -234,18 +184,12 @@ async function inputCustomLocale(): Promise<string | undefined> {
       return undefined;
     },
   });
-
   return locale?.trim();
 }
-
-/**
- * Values file types for locale creation
- */
 interface ValuesFileItem extends vscode.QuickPickItem {
   fileName: string;
   template: string;
 }
-
 const VALUES_FILE_TYPES: ValuesFileItem[] = [
   {
     label: '$(symbol-string) strings.xml',
@@ -278,20 +222,12 @@ const VALUES_FILE_TYPES: ValuesFileItem[] = [
 `,
   },
 ];
-
-/**
- * Pick which values file to create for locale
- */
 export async function pickValuesFile(): Promise<ValuesFileItem | undefined> {
   return vscode.window.showQuickPick(VALUES_FILE_TYPES, {
     title: 'Select Values File',
     placeHolder: 'Choose which file to create for this locale',
   });
 }
-
-/**
- * Get default file template based on resource type
- */
 export function getResourceTemplate(type: ResourceFolderType, fileName: string): string {
   switch (type) {
     case 'layout':
@@ -302,10 +238,8 @@ export function getResourceTemplate(type: ResourceFolderType, fileName: string):
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
-
 </androidx.constraintlayout.widget.ConstraintLayout>
 `;
-
     case 'drawable':
       if (fileName.endsWith('.xml')) {
         return `<?xml version="1.0" encoding="utf-8"?>
@@ -314,12 +248,10 @@ export function getResourceTemplate(type: ResourceFolderType, fileName: string):
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-
 </vector>
 `;
       }
       return '';
-
     case 'values':
       if (fileName.includes('strings')) {
         return `<?xml version="1.0" encoding="utf-8"?>
@@ -357,32 +289,24 @@ export function getResourceTemplate(type: ResourceFolderType, fileName: string):
       }
       return `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-
 </resources>
 `;
-
     case 'menu':
       return `<?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-
 </menu>
 `;
-
     case 'anim':
       return `<?xml version="1.0" encoding="utf-8"?>
 <set xmlns:android="http://schemas.android.com/apk/res/android">
-
 </set>
 `;
-
     case 'animator':
       return `<?xml version="1.0" encoding="utf-8"?>
 <set xmlns:android="http://schemas.android.com/apk/res/android">
-
 </set>
 `;
-
     case 'color':
       return `<?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
@@ -390,35 +314,25 @@ export function getResourceTemplate(type: ResourceFolderType, fileName: string):
     <item android:color="#808080" android:state_enabled="false"/>
 </selector>
 `;
-
     case 'xml':
       return `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-
 </resources>
 `;
-
     case 'navigation':
       return `<?xml version="1.0" encoding="utf-8"?>
 <navigation xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/nav_graph">
-
 </navigation>
 `;
-
     default:
       return `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-
 </resources>
 `;
   }
 }
-
-/**
- * Confirm overwrite of existing file
- */
 export async function confirmOverwrite(filePath: string): Promise<boolean> {
   const result = await vscode.window.showWarningMessage(
     `File already exists: ${filePath}`,
@@ -428,10 +342,6 @@ export async function confirmOverwrite(filePath: string): Promise<boolean> {
   );
   return result === 'Overwrite';
 }
-
-/**
- * Show error with optional action
- */
 export async function showCreationError(
   message: string,
   action?: { label: string; callback: () => void }

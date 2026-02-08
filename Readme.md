@@ -1,8 +1,8 @@
-# 🚀 Android Toolkit for VS Code
+# 🚀 Android Tools for VS Code
 
 > **Fast, lightweight Android workflow in VS Code — without Android Studio.**
 
-Android Toolkit for VS Code is an open‑source extension that brings the **most used parts of Android Studio** into VS Code, without the heavy IDE, long startup times, and unnecessary complexity.
+Android Tools for VS Code is an open‑source extension that brings the **most used parts of Android Studio** into VS Code, without the heavy IDE, long startup times, and unnecessary complexity.
 
 The goal is **not** to replace Android Studio.
 The goal is to cover **80% of daily Android needs with 20% of the complexity**.
@@ -180,5 +180,5 @@ MIT
 
 ---
 
-> **Android Toolkit for VS Code**
+> **Android Tools for VS Code**
 > Build Android apps without fighting your IDE.

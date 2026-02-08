@@ -1,26 +1,9 @@
-/**
- * Emulator Control TreeView
- * TreeView showing running emulators with control actions
- */
-
 import * as vscode from 'vscode';
 import { listRunningEmulators } from '../devices/deviceManager';
 import { getAvdNameForDevice, getNetworkStatus } from './emulatorCommands';
 import { NetworkStatus } from './types';
-
-/**
- * Tree item types
- */
 type ControlNodeType = 'emulator' | 'action' | 'placeholder';
-
-/**
- * Action identifiers
- */
 type ActionId = 'rotate' | 'screenshot' | 'coldBoot' | 'warmBoot' | 'wipeData' | 'toggleNetwork';
-
-/**
- * Control tree item data
- */
 interface ControlNodeData {
   type: ControlNodeType;
   deviceId?: string;
@@ -28,13 +11,8 @@ interface ControlNodeData {
   actionId?: ActionId;
   networkStatus?: NetworkStatus;
 }
-
-/**
- * Emulator control tree item
- */
 export class EmulatorControlItem extends vscode.TreeItem {
   public readonly data: ControlNodeData;
-
   constructor(
     data: ControlNodeData,
     label: string,
@@ -43,12 +21,10 @@ export class EmulatorControlItem extends vscode.TreeItem {
     super(label, collapsibleState);
     this.data = data;
     this.contextValue = data.type;
-
     this.setIcon();
     this.setTooltip();
     this.setCommand();
   }
-
   private setIcon(): void {
     switch (this.data.type) {
       case 'emulator':
@@ -62,7 +38,6 @@ export class EmulatorControlItem extends vscode.TreeItem {
         break;
     }
   }
-
   private getActionIcon(): vscode.ThemeIcon {
     switch (this.data.actionId) {
       case 'rotate':
@@ -83,7 +58,6 @@ export class EmulatorControlItem extends vscode.TreeItem {
         return new vscode.ThemeIcon('circle');
     }
   }
-
   private setTooltip(): void {
     switch (this.data.actionId) {
       case 'rotate':
@@ -113,7 +87,6 @@ export class EmulatorControlItem extends vscode.TreeItem {
         break;
     }
   }
-
   private setCommand(): void {
     if (this.data.type === 'action' && this.data.deviceId && this.data.actionId) {
       this.command = {
@@ -124,32 +97,19 @@ export class EmulatorControlItem extends vscode.TreeItem {
     }
   }
 }
-
-/**
- * Emulator control tree data provider
- */
 export class EmulatorControlProvider implements vscode.TreeDataProvider<EmulatorControlItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<EmulatorControlItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-
-  /**
-   * Refresh the tree
-   */
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
-
   getTreeItem(element: EmulatorControlItem): vscode.TreeItem {
     return element;
   }
-
   async getChildren(element?: EmulatorControlItem): Promise<EmulatorControlItem[]> {
-    // Root level - show running emulators
     if (!element) {
       return this.getEmulatorNodes();
     }
-
-    // Emulator level - show actions
     if (element.data.type === 'emulator') {
       return this.getActionNodes(
         element.data.deviceId!,
@@ -157,14 +117,11 @@ export class EmulatorControlProvider implements vscode.TreeDataProvider<Emulator
         element.data.networkStatus
       );
     }
-
     return [];
   }
-
   private async getEmulatorNodes(): Promise<EmulatorControlItem[]> {
     try {
       const emulators = await listRunningEmulators();
-
       if (emulators.length === 0) {
         return [
           new EmulatorControlItem(
@@ -174,13 +131,10 @@ export class EmulatorControlProvider implements vscode.TreeDataProvider<Emulator
           ),
         ];
       }
-
       const items: EmulatorControlItem[] = [];
-
       for (const emu of emulators) {
         const avdName = await getAvdNameForDevice(emu.id);
         const networkStatus = await getNetworkStatus(emu.id);
-
         items.push(
           new EmulatorControlItem(
             {
@@ -194,7 +148,6 @@ export class EmulatorControlProvider implements vscode.TreeDataProvider<Emulator
           )
         );
       }
-
       return items;
     } catch {
       return [
@@ -206,7 +159,6 @@ export class EmulatorControlProvider implements vscode.TreeDataProvider<Emulator
       ];
     }
   }
-
   private getActionNodes(
     deviceId: string,
     avdName?: string,
@@ -223,7 +175,6 @@ export class EmulatorControlProvider implements vscode.TreeDataProvider<Emulator
         label: networkStatus === 'enabled' ? 'Disable Network' : 'Enable Network' 
       },
     ];
-
     return actions.map(action => 
       new EmulatorControlItem(
         {

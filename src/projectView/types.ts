@@ -1,44 +1,23 @@
-/**
- * Android Project View Types
- * Type definitions for the TreeView structure
- */
-
 import * as vscode from 'vscode';
-
-/**
- * Type of tree item
- */
 export type ProjectNodeType = 
-  | 'root'           // Project root
-  | 'category'       // Virtual folder (Manifests, Java, Res, etc.)
-  | 'folder'         // Real folder
-  | 'package'        // Java/Kotlin package
-  | 'file';          // Real file
-
-/**
- * Category identifiers for virtual folders
- */
+  | 'root'           
+  | 'category'       
+  | 'folder'         
+  | 'package'        
+  | 'file';          
 export type CategoryId = 
   | 'manifests'
   | 'java'
   | 'res'
   | 'assets'
   | 'gradle';
-
-/**
- * Configuration for a category
- */
 export interface CategoryConfig {
   id: CategoryId;
   label: string;
   icon: string;
-  patterns: string[];  // Glob patterns to match files
-  rootPaths: string[]; // Relative paths to scan from workspace root
+  patterns: string[];  
+  rootPaths: string[]; 
 }
-
-/**
- * Data associated with each tree node
- */
 export interface ProjectNodeData {
   type: ProjectNodeType;
   categoryId?: CategoryId;
@@ -46,10 +25,6 @@ export interface ProjectNodeData {
   label: string;
   description?: string;
 }
-
-/**
- * Category configurations
- */
 export const CATEGORY_CONFIGS: CategoryConfig[] = [
   {
     id: 'manifests',

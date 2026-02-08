@@ -1,9 +1,13 @@
 {
-  "name": "android-toolkit",
-  "displayName": "Android Toolkit for VS Code",
+  "name": "android-tools",
+  "displayName": "Android Tools for VS Code",
   "description": "Fast, lightweight Android device and emulator management using CLI tools",
   "version": "0.1.0",
-  "publisher": "android-toolkit",
+  "publisher": "android-tools",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/android-tools/vscode-android-tools"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -19,7 +23,7 @@
       "activitybar": [
         {
           "id": "android-toolkit",
-          "title": "Android Toolkit",
+          "title": "Android Tools",
           "icon": "$(device-mobile)"
         }
       ]

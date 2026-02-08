@@ -10,3 +10,6 @@ vsc-extension-quickstart.md
 **/*.ts
 !out/**
 node_modules/**
+**/*.test.ts
+**/*.spec.ts
+.github/**

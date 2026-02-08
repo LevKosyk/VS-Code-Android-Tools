@@ -1,41 +1,24 @@
-/**
- * AVD Creator
- * Create new Android Virtual Devices using avdmanager
- */
-
 import { execCommand, execCommandLines } from '../core/cli';
 import { detectSdk } from '../core/sdkDetector';
 import { AvdManagerError, EmulatorError } from '../core/errors';
 import { SystemImage, DeviceProfile, CreateAvdOptions } from './types';
-
-/**
- * List available system images
- */
 export async function listSystemImages(): Promise<SystemImage[]> {
   const sdk = detectSdk();
-
   if (!sdk.avdmanager) {
     throw new AvdManagerError(
       'list target',
       'avdmanager not found. Install Android SDK Command-line Tools.'
     );
   }
-
   const result = await execCommand(sdk.avdmanager, ['list', 'target', '-c']);
-
   if (result.exitCode !== 0) {
     throw new AvdManagerError('list target', result.stderr);
   }
-
-  // Parse system images from sdkmanager list instead (more reliable)
   const sdkmanagerPath = sdk.avdmanager.replace('avdmanager', 'sdkmanager');
   const sdkResult = await execCommand(sdkmanagerPath, ['--list']);
-
   const images: SystemImage[] = [];
   const lines = sdkResult.stdout.split('\n');
-
   for (const line of lines) {
-    // Match system-images;android-XX;tag;abi
     const match = line.match(/^\s*(system-images;android-(\d+);([^;]+);([^\s|]+))/);
     if (match) {
       const [, id, apiLevel, tag, abi] = match;
@@ -48,49 +31,32 @@ export async function listSystemImages(): Promise<SystemImage[]> {
       });
     }
   }
-
   if (images.length === 0) {
     throw EmulatorError.noSystemImages();
   }
-
-  // Sort by API level descending
   images.sort((a, b) => b.apiLevel - a.apiLevel);
-
   return images;
 }
-
-/**
- * List available device profiles
- */
 export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
   const sdk = detectSdk();
-
   if (!sdk.avdmanager) {
     throw new AvdManagerError(
       'list device',
       'avdmanager not found. Install Android SDK Command-line Tools.'
     );
   }
-
   const result = await execCommand(sdk.avdmanager, ['list', 'device', '-c']);
-
   if (result.exitCode !== 0) {
     throw new AvdManagerError('list device', result.stderr);
   }
-
   const profiles: DeviceProfile[] = [];
   const lines = result.stdout.split('\n');
-
   let currentId = '';
   let currentName = '';
   let currentManufacturer = '';
-
   for (const line of lines) {
     const trimmed = line.trim();
-
-    // Parse compact format: "id: X or "Name""
     if (trimmed.startsWith('id:')) {
-      // Save previous if exists
       if (currentId) {
         profiles.push({
           id: currentId,
@@ -98,7 +64,6 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
           manufacturer: currentManufacturer || 'Unknown',
         });
       }
-
       const match = trimmed.match(/id:\s*\d+\s+or\s+"([^"]+)"/);
       if (match) {
         currentId = match[1];
@@ -111,7 +76,6 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
       currentManufacturer = trimmed.replace('OEM:', '').trim();
     }
   }
-
   // Don't forget the last one
   if (currentId) {
     profiles.push({
@@ -120,7 +84,6 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
       manufacturer: currentManufacturer || 'Unknown',
     });
   }
-
   // Add some common defaults if parsing failed
   if (profiles.length === 0) {
     profiles.push(
@@ -131,46 +94,37 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
       { id: 'Nexus 5X', name: 'Nexus 5X', manufacturer: 'LG' },
     );
   }
-
   return profiles;
 }
-
 /**
  * Create a new AVD
  */
 export async function createAvd(options: CreateAvdOptions): Promise<void> {
   const sdk = detectSdk();
-
   if (!sdk.avdmanager) {
     throw new AvdManagerError(
       'create avd',
       'avdmanager not found. Install Android SDK Command-line Tools.'
     );
   }
-
   // Build command arguments
   const args = [
     'create', 'avd',
     '-n', options.name,
     '-k', options.systemImage,
   ];
-
   if (options.device) {
     args.push('-d', options.device);
   }
-
   if (options.force) {
     args.push('--force');
   }
-
   // Execute with "no" input to skip custom hardware question
   const result = await execCommand(sdk.avdmanager, args, {
     timeout: 60_000,
   });
-
   // avdmanager prompts for custom hardware profile, we accept defaults
   // by providing empty input (which defaults to "no")
-
   if (result.exitCode !== 0) {
     // Check for common errors
     if (result.stderr.includes('Package path is not valid')) {
@@ -180,7 +134,6 @@ export async function createAvd(options: CreateAvdOptions): Promise<void> {
         'Install the system image using:\nsdkmanager "' + options.systemImage + '"'
       );
     }
-
     if (result.stderr.includes('already exists')) {
       throw new EmulatorError(
         `AVD already exists: ${options.name}`,
@@ -188,37 +141,27 @@ export async function createAvd(options: CreateAvdOptions): Promise<void> {
         'Use a different name or delete the existing AVD.'
       );
     }
-
     throw EmulatorError.creationFailed(options.name, result.stderr);
   }
 }
-
 /**
  * Delete an existing AVD
  */
 export async function deleteAvd(name: string): Promise<void> {
   const sdk = detectSdk();
-
   if (!sdk.avdmanager) {
     throw new AvdManagerError(
       'delete avd',
       'avdmanager not found. Install Android SDK Command-line Tools.'
     );
   }
-
   const result = await execCommand(sdk.avdmanager, ['delete', 'avd', '-n', name]);
-
   if (result.exitCode !== 0) {
     throw new AvdManagerError(`delete avd -n ${name}`, result.stderr);
   }
 }
-
-/**
- * Check if an AVD with the given name exists
- */
 export async function avdExists(name: string): Promise<boolean> {
   const sdk = detectSdk();
-  
   const lines = await execCommandLines(sdk.emulator, ['-list-avds']);
   return lines.includes(name);
 }

@@ -1,8 +1,3 @@
-/**
- * Device Manager TreeView Provider
- * Unified view for Android and iOS device management
- */
-
 import * as vscode from 'vscode';
 import { 
   Platform, 
@@ -19,13 +14,8 @@ import {
   listSimulators, 
   checkXcodeAvailable 
 } from '../ios/simulatorManager';
-
-/**
- * Device Manager tree item
- */
 export class DeviceManagerItem extends vscode.TreeItem {
   public readonly data: DeviceNodeData;
-
   constructor(
     data: DeviceNodeData,
     label: string,
@@ -38,14 +28,12 @@ export class DeviceManagerItem extends vscode.TreeItem {
     this.setTooltip();
     this.setCommand();
   }
-
   private getContextValue(): string {
     if (this.data.type === 'device' && this.data.device) {
       return `device-${this.data.device.platform}-${this.data.device.state}`;
     }
     return this.data.type;
   }
-
   private setIcon(): void {
     switch (this.data.type) {
       case 'platform':
@@ -71,7 +59,6 @@ export class DeviceManagerItem extends vscode.TreeItem {
         break;
     }
   }
-
   private getActionIcon(): vscode.ThemeIcon {
     switch (this.data.action) {
       case 'launch':
@@ -84,7 +71,6 @@ export class DeviceManagerItem extends vscode.TreeItem {
         return new vscode.ThemeIcon('circle');
     }
   }
-
   private setTooltip(): void {
     if (this.data.type === 'device' && this.data.device) {
       const d = this.data.device;
@@ -95,7 +81,6 @@ export class DeviceManagerItem extends vscode.TreeItem {
         : 'iOS Simulators';
     }
   }
-
   private setCommand(): void {
     if (this.data.type === 'action' && this.data.device && this.data.action) {
       this.command = {
@@ -112,58 +97,34 @@ export class DeviceManagerItem extends vscode.TreeItem {
     }
   }
 }
-
-/**
- * Device Manager TreeDataProvider
- */
 export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceManagerItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<DeviceManagerItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-
-  /**
-   * Refresh the tree
-   */
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
-
   getTreeItem(element: DeviceManagerItem): vscode.TreeItem {
     return element;
   }
-
   async getChildren(element?: DeviceManagerItem): Promise<DeviceManagerItem[]> {
-    // Root level - show platforms
     if (!element) {
       return this.getPlatformNodes();
     }
-
-    // Platform level - show devices
     if (element.data.type === 'platform' && element.data.platform) {
       return this.getDevicesForPlatform(element.data.platform);
     }
-
-    // Device level - show actions
     if (element.data.type === 'device' && element.data.device) {
       return this.getDeviceActions(element.data.device);
     }
-
     return [];
   }
-
-  /**
-   * Get platform header nodes
-   */
   private async getPlatformNodes(): Promise<DeviceManagerItem[]> {
     const nodes: DeviceManagerItem[] = [];
-
-    // Android is always available (we may show error inside)
     nodes.push(new DeviceManagerItem(
       { type: 'platform', platform: 'android' },
       'Android',
       vscode.TreeItemCollapsibleState.Expanded
     ));
-
-    // iOS only on macOS
     if (isIOSAvailable()) {
       nodes.push(new DeviceManagerItem(
         { type: 'platform', platform: 'ios' },
@@ -171,20 +132,13 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
         vscode.TreeItemCollapsibleState.Expanded
       ));
     }
-
-    // Create Device action
     nodes.push(new DeviceManagerItem(
       { type: 'create' },
       'Create Device',
       vscode.TreeItemCollapsibleState.None
     ));
-
     return nodes;
   }
-
-  /**
-   * Get devices for a platform
-   */
   private async getDevicesForPlatform(platform: Platform): Promise<DeviceManagerItem[]> {
     if (platform === 'android') {
       return this.getAndroidDevices();
@@ -192,15 +146,10 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
       return this.getIOSDevices();
     }
   }
-
-  /**
-   * Get Android emulators
-   */
   private async getAndroidDevices(): Promise<DeviceManagerItem[]> {
     try {
       const avds = await listAvds();
       const runningEmulators = await listRunningEmulators();
-
       if (avds.length === 0) {
         return [new DeviceManagerItem(
           { type: 'placeholder', message: 'No emulators found' },
@@ -208,12 +157,10 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           vscode.TreeItemCollapsibleState.None
         )];
       }
-
       return avds.map(avd => {
         const running = runningEmulators.find(e => 
           e.id.includes(avd.name) || avd.deviceId === e.id
         );
-
         const device: UnifiedDevice = {
           id: avd.deviceId || avd.name,
           name: avd.name,
@@ -223,7 +170,6 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           osVersion: 'Android',
           platformId: avd.name,
         };
-
         return new DeviceManagerItem(
           { type: 'device', device },
           avd.name,
@@ -238,10 +184,6 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
       )];
     }
   }
-
-  /**
-   * Get iOS simulators
-   */
   private async getIOSDevices(): Promise<DeviceManagerItem[]> {
     try {
       const xcodeAvailable = await checkXcodeAvailable();
@@ -252,14 +194,10 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           vscode.TreeItemCollapsibleState.None
         )];
       }
-
       const simulators = await listSimulators();
-      
-      // Filter to only available simulators, limit to avoid clutter
       const available = simulators
         .filter(sim => sim.isAvailable)
         .slice(0, 20);
-
       if (available.length === 0) {
         return [new DeviceManagerItem(
           { type: 'placeholder', message: 'No simulators' },
@@ -267,7 +205,6 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           vscode.TreeItemCollapsibleState.None
         )];
       }
-
       return available.map(sim => {
         const device: UnifiedDevice = {
           id: sim.udid,
@@ -278,7 +215,6 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           osVersion: sim.runtime,
           platformId: sim.udid,
         };
-
         return new DeviceManagerItem(
           { type: 'device', device },
           sim.name,
@@ -293,13 +229,8 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
       )];
     }
   }
-
-  /**
-   * Get actions for a device
-   */
   private getDeviceActions(device: UnifiedDevice): DeviceManagerItem[] {
     const actions: DeviceManagerItem[] = [];
-
     if (device.state === 'running') {
       actions.push(new DeviceManagerItem(
         { type: 'action', action: 'stop', device },
@@ -313,13 +244,11 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
         vscode.TreeItemCollapsibleState.None
       ));
     }
-
     actions.push(new DeviceManagerItem(
       { type: 'action', action: 'delete', device },
       'Delete',
       vscode.TreeItemCollapsibleState.None
     ));
-
     return actions;
   }
 }

@@ -1,7 +1,3 @@
-/**
- * Device Manager Module Exports
- */
-
 export * from './types';
 export { DeviceManagerProvider, DeviceManagerItem } from './deviceManagerProvider';
 export { 

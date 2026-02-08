@@ -1,22 +1,9 @@
-/**
- * VS Code Quick Pick Interfaces
- * User selection dialogs for devices, emulators, and system images
- */
-
 import * as vscode from 'vscode';
 import { AndroidDevice } from '../devices/types';
 import { Avd, SystemImage, DeviceProfile } from '../emulators/types';
-
-/**
- * Quick pick item with associated data
- */
 interface QuickPickItemWithData<T> extends vscode.QuickPickItem {
   data: T;
 }
-
-/**
- * Show device selection Quick Pick
- */
 export async function pickDevice(
   devices: AndroidDevice[],
   options: { title?: string; placeholder?: string } = {}
@@ -25,25 +12,18 @@ export async function pickDevice(
     vscode.window.showWarningMessage('No Android devices found.');
     return undefined;
   }
-
   const items: QuickPickItemWithData<AndroidDevice>[] = devices.map(device => ({
     label: device.id,
     description: `${device.type} • ${device.status}`,
     detail: device.model ? `${device.model} (Android ${device.androidVersion || 'unknown'})` : undefined,
     data: device,
   }));
-
   const selected = await vscode.window.showQuickPick(items, {
     title: options.title || 'Select Android Device',
     placeHolder: options.placeholder || 'Choose a device',
   });
-
   return selected?.data;
 }
-
-/**
- * Show AVD selection Quick Pick
- */
 export async function pickAvd(
   avds: Avd[],
   options: { 
@@ -53,42 +33,32 @@ export async function pickAvd(
   } = {}
 ): Promise<Avd | undefined> {
   let filteredAvds = avds;
-
   if (options.filter === 'running') {
     filteredAvds = avds.filter(a => a.status === 'running');
   } else if (options.filter === 'stopped') {
     filteredAvds = avds.filter(a => a.status === 'stopped');
   }
-
   if (filteredAvds.length === 0) {
     const message = options.filter === 'running'
       ? 'No running emulators found.'
       : options.filter === 'stopped'
         ? 'No stopped emulators available. Run "Android: Create Emulator" to create one.'
         : 'No emulators found. Run "Android: Create Emulator" to create one.';
-    
     vscode.window.showWarningMessage(message);
     return undefined;
   }
-
   const items: QuickPickItemWithData<Avd>[] = filteredAvds.map(avd => ({
     label: avd.name,
     description: avd.status === 'running' ? '$(debug-start) Running' : '$(debug-stop) Stopped',
     detail: avd.deviceId ? `Device: ${avd.deviceId}` : undefined,
     data: avd,
   }));
-
   const selected = await vscode.window.showQuickPick(items, {
     title: options.title || 'Select Emulator',
     placeHolder: options.placeholder || 'Choose an emulator',
   });
-
   return selected?.data;
 }
-
-/**
- * Show system image selection Quick Pick
- */
 export async function pickSystemImage(
   images: SystemImage[],
   options: { title?: string } = {}
@@ -99,25 +69,18 @@ export async function pickSystemImage(
     );
     return undefined;
   }
-
   const items: QuickPickItemWithData<SystemImage>[] = images.map(image => ({
     label: `Android ${image.apiLevel}`,
     description: `${image.tag} • ${image.abi}`,
     detail: image.id,
     data: image,
   }));
-
   const selected = await vscode.window.showQuickPick(items, {
     title: options.title || 'Select System Image',
     placeHolder: 'Choose an Android version',
   });
-
   return selected?.data;
 }
-
-/**
- * Show device profile selection Quick Pick
- */
 export async function pickDeviceProfile(
   profiles: DeviceProfile[],
   options: { title?: string } = {}
@@ -127,14 +90,11 @@ export async function pickDeviceProfile(
     description: profile.manufacturer,
     data: profile,
   }));
-
-  // Add "No device profile" option
   const noProfile: QuickPickItemWithData<DeviceProfile | null> = {
     label: '$(dash) Use default profile',
     description: 'No specific device',
     data: null as unknown as DeviceProfile,
   };
-
   const selected = await vscode.window.showQuickPick(
     [noProfile, ...items] as QuickPickItemWithData<DeviceProfile>[],
     {
@@ -142,18 +102,11 @@ export async function pickDeviceProfile(
       placeHolder: 'Choose a device type',
     }
   );
-
-  // Handle the "no profile" case
   if (selected && selected.label.includes('default')) {
     return undefined;
   }
-
   return selected?.data;
 }
-
-/**
- * Show input box for AVD name
- */
 export async function inputAvdName(): Promise<string | undefined> {
   const name = await vscode.window.showInputBox({
     title: 'Create New Emulator',
@@ -172,6 +125,5 @@ export async function inputAvdName(): Promise<string | undefined> {
       return undefined;
     },
   });
-
   return name;
 }
