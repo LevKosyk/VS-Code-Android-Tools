@@ -174,22 +174,18 @@ export class ProfilerPanel {
     <button onclick="startup()">🚀 Measure Startup</button>
   </div>
   <div class="card-grid">
-    <!-- CPU Card -->
     <div class="card">
       <div class="card-title">CPU Usage</div>
       <div id="cpuStats">No data captured</div>
     </div>
-    <!-- Memory Card -->
     <div class="card">
       <div class="card-title">Memory Usage</div>
       <div id="memStats">No data captured</div>
     </div>
-    <!-- Graphics Card -->
     <div class="card">
       <div class="card-title">Graphics (Jank)</div>
       <div id="gfxStats">No data captured</div>
     </div>
-    <!-- Startup Card -->
     <div class="card">
       <div class="card-title">Startup Time</div>
       <div id="startupStats">No data captured</div>
@@ -197,17 +193,14 @@ export class ProfilerPanel {
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    // State
     const state = {
       devices: [],
       packages: [],
       cpu: null,
       mem: null
     };
-    // DOM Elements
     const deviceSelect = document.getElementById('deviceSelect');
     const packageSelect = document.getElementById('packageSelect');
-    // Event Listeners
     deviceSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'selectDevice', deviceId: deviceSelect.value });
     });
@@ -217,7 +210,6 @@ export class ProfilerPanel {
     function refresh() { vscode.postMessage({ type: 'refreshDevices' }); }
     function capture() { vscode.postMessage({ type: 'captureSnapshot' }); }
     function startup() { vscode.postMessage({ type: 'measureStartup' }); }
-    // Message Handler
     window.addEventListener('message', event => {
       const msg = event.data;
       switch (msg.type) {

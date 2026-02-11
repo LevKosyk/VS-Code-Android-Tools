@@ -364,8 +364,8 @@ export async function createClassFlow(
   }
   const content = `package ${packageName}
 ${isKotlin ? 'class' : 'public class'} ${nameInput} {
-    ${isKotlin ? '// TODO: Implement class' : '// TODO: Implement class'}
-}`;
+}
+`;
   try {
     const fs = require('fs');
     if (fs.existsSync(fileUri.fsPath)) {

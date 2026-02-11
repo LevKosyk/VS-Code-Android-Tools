@@ -1,4 +1,4 @@
-import { execCommand, execCommandLines } from '../core/cli';
+import { execCommand, execCommandLines, execCommandWithInput } from '../core/cli';
 import { detectSdk } from '../core/sdkDetector';
 import { AvdManagerError, EmulatorError } from '../core/errors';
 import { SystemImage, DeviceProfile, CreateAvdOptions } from './types';
@@ -76,7 +76,6 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
       currentManufacturer = trimmed.replace('OEM:', '').trim();
     }
   }
-  // Don't forget the last one
   if (currentId) {
     profiles.push({
       id: currentId,
@@ -84,7 +83,6 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
       manufacturer: currentManufacturer || 'Unknown',
     });
   }
-  // Add some common defaults if parsing failed
   if (profiles.length === 0) {
     profiles.push(
       { id: 'pixel_7', name: 'Pixel 7', manufacturer: 'Google' },
@@ -96,9 +94,6 @@ export async function listDeviceProfiles(): Promise<DeviceProfile[]> {
   }
   return profiles;
 }
-/**
- * Create a new AVD
- */
 export async function createAvd(options: CreateAvdOptions): Promise<void> {
   const sdk = detectSdk();
   if (!sdk.avdmanager) {
@@ -107,7 +102,6 @@ export async function createAvd(options: CreateAvdOptions): Promise<void> {
       'avdmanager not found. Install Android SDK Command-line Tools.'
     );
   }
-  // Build command arguments
   const args = [
     'create', 'avd',
     '-n', options.name,
@@ -119,14 +113,10 @@ export async function createAvd(options: CreateAvdOptions): Promise<void> {
   if (options.force) {
     args.push('--force');
   }
-  // Execute with "no" input to skip custom hardware question
-  const result = await execCommand(sdk.avdmanager, args, {
+  const result = await execCommandWithInput(sdk.avdmanager, args, 'no\n', {
     timeout: 60_000,
   });
-  // avdmanager prompts for custom hardware profile, we accept defaults
-  // by providing empty input (which defaults to "no")
   if (result.exitCode !== 0) {
-    // Check for common errors
     if (result.stderr.includes('Package path is not valid')) {
       throw new EmulatorError(
         `Invalid system image: ${options.systemImage}`,
@@ -144,9 +134,6 @@ export async function createAvd(options: CreateAvdOptions): Promise<void> {
     throw EmulatorError.creationFailed(options.name, result.stderr);
   }
 }
-/**
- * Delete an existing AVD
- */
 export async function deleteAvd(name: string): Promise<void> {
   const sdk = detectSdk();
   if (!sdk.avdmanager) {

@@ -2,7 +2,7 @@
   <img src="assets/logo/logo.png" width="120" alt="Android Sidecar Logo" />
 </div>
 
-# 🚀 Android Tools for VS Code
+# Android Tools for VS Code
 
 > **Run, debug, and control Android apps in VS Code — without Android Studio.**
 
@@ -17,7 +17,7 @@ It is a **sidecar** — focused on speed, simplicity, and daily developer needs.
 
 ---
 
-## ✨ Why Android Sidecar?
+## Why Android Sidecar?
 
 Most Android developers open Android Studio just to:
 
@@ -32,20 +32,20 @@ Everything else already happens in VS Code.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
-### ▶️ Fast Android Runner
+### Fast Android Runner
 - Automatic Android SDK & ADB detection
 - List available Android Virtual Devices (AVDs)
 - Start / stop emulators
 - Install APKs or debug builds
-- Reinstall & run app quickly
+- Run your app on a selected emulator (build, install, launch)
 - Device discovery via `adb devices`
 - Clear run & device status indicators
 
 ---
 
-### 📁 Android Project View
+### Android Project View
 Android‑Studio‑inspired logical project structure:
 
 - **Manifests**
@@ -54,11 +54,15 @@ Android‑Studio‑inspired logical project structure:
 - **Assets**
 - **Gradle Scripts**
 
-> Visual organization only — your real file system remains unchanged.
+Project view actions:
+- Create Kotlin/Java classes
+- Create files and folders
+- Rename and delete items
+- Drag & drop to move files between folders
 
 ---
 
-### 🎛 Emulator Control
+### Emulator Control
 Control Android emulators directly from VS Code:
 
 - Screen rotation
@@ -66,12 +70,12 @@ Control Android emulators directly from VS Code:
 - Cold / warm boot
 - Wipe data
 - Network on / off
-- Battery simulation *(level & charging)*
+- Battery simulation (level & charging)
 - GPS location mocking *(planned)*
 
 ---
 
-### 📜 Logcat Viewer
+### Logcat Viewer
 Minimal, fast Logcat experience:
 
 - Live Logcat stream
@@ -81,8 +85,8 @@ Minimal, fast Logcat experience:
 
 ---
 
-## 🧪 Debugging (Minimal)
-> Focused on everyday debugging — not full Android Studio replacement.
+## Debugging (Minimal)
+Focused on everyday debugging — not full Android Studio replacement.
 
 - Breakpoints
 - Stack traces
@@ -91,7 +95,48 @@ Minimal, fast Logcat experience:
 
 ---
 
-## 🧭 Roadmap
+## New Project Wizard
+Create a clean Android project from VS Code:
+- App name, package name, language
+- App module with Activity, manifest, resources
+- Gradle files generated (wrapper if Gradle is available)
+
+## Commands
+- `Android: List Devices`
+- `Android: Start Emulator`
+- `Android: Stop Emulator`
+- `Android: Create Emulator`
+- `Android: Run App on Emulator`
+- `Android: Install APK`
+- `Android: Uninstall App`
+- `Android: Restart App`
+- `Android: Open Logcat Viewer`
+- `Android: Clear Logcat`
+- `Android: Rotate Screen`
+- `Android: Take Screenshot`
+- `Android: Cold Boot`
+- `Android: Warm Boot`
+- `Android: Wipe Data`
+- `Android: Toggle Network`
+- `Android: Set Location`
+- `Android: Start Screen Recording`
+- `Android: Stop Screen Recording`
+- `Android: Set Battery Level`
+- `Android: Attach Debugger`
+- `Android: Detach Debugger`
+- `Android: Toggle Breakpoint`
+- `Android: Debug Status`
+- `Android: Open Emulator Control`
+- `Android: Open Performance Profiler`
+- `Android: Create Resource`
+- `Android: Create Class`
+- `Android: Create File`
+- `Android: Create Folder`
+- `Android: Create Asset`
+- `Android: Create Language/Locale`
+- `Android: New Project`
+
+## Roadmap
 
 ### Phase 1 — Core (MVP)
 - Fast Android Runner
@@ -113,7 +158,7 @@ Minimal, fast Logcat experience:
 
 ---
 
-## ❌ Out of Scope
+## Out of Scope
 
 Android Sidecar **will not** include:
 
@@ -126,7 +171,7 @@ Android Sidecar **will not** include:
 
 ---
 
-## 🛠 How It Works
+## How It Works
 
 - Built on the VS Code Extension API
 - Powered by existing Android CLI tools:
@@ -138,18 +183,22 @@ Android Sidecar **will not** include:
 
 ---
 
-## 📦 Requirements
+## Requirements
 
 - Android SDK
 - ADB
 - Android Emulator
 - VS Code (latest stable)
+- JDK 17+ (recommended JDK 21 for Kotlin language server)
 
-> Android Studio is **not required**.
+Optional:
+- Debugger for Java extension (for debugging)
+- Kotlin Language extension (for Kotlin support)
+  - If Kotlin server crashes, use JDK 21 and set `JAVA_HOME` to it
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Android Sidecar is open‑source and community‑driven.
 
@@ -157,11 +206,11 @@ Android Sidecar is open‑source and community‑driven.
 - Bug reports
 - Pull requests
 
-are all welcome ❤️
+are all welcome
 
 ---
 
-## 📜 License
+## License
 
 MIT
 

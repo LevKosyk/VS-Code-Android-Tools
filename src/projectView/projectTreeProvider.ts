@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { CategoryId, CATEGORY_CONFIGS } from './types';
 import { 
   ProjectTreeItem, 
@@ -20,8 +21,10 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
   private workspaceRoot: string | undefined;
   private projectName: string = 'Android Project';
   private isAndroid: boolean = false;
+  public readonly dragAndDropController: AndroidProjectDragAndDropController;
   constructor() {
     this.updateWorkspace();
+    this.dragAndDropController = new AndroidProjectDragAndDropController(this);
   }
   private updateWorkspace(): void {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -57,6 +60,14 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
     }
     if (element.data.type === 'category' && element.data.categoryId) {
       return this.getCategoryChildren(element.data.categoryId);
+    }
+    if (element.data.type === 'package') {
+      if (element.children && element.children.length > 0) {
+        return element.children;
+      }
+      if (element.data.resourceUri) {
+        return this.getFolderChildren(element.data.resourceUri);
+      }
     }
     if (element.data.type === 'folder' && element.data.resourceUri) {
       return this.getFolderChildren(element.data.resourceUri);
@@ -158,9 +169,14 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
       return files.map(f => createFileNode(f.uri, f.name, f.isDirectory));
     }
     const directories = new Map<string, vscode.Uri>();
+    const rootFiles: ProjectTreeItem[] = [];
     for (const file of files) {
       const relativePath = path.relative(rootPath, file.uri.fsPath);
       const parts = relativePath.split(path.sep);
+      if (parts.length === 1) {
+        rootFiles.push(createFileNode(file.uri, file.name, file.isDirectory));
+        continue;
+      }
       if (parts.length > 1) {
         const dirName = parts[0];
         if (!directories.has(dirName)) {
@@ -171,9 +187,10 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
         }
       }
     }
-    return Array.from(directories.entries())
+    const dirNodes = Array.from(directories.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([name, uri]) => createFileNode(uri, name, true));
+    return [...dirNodes, ...rootFiles];
   }
   private async getFolderChildren(uri: vscode.Uri): Promise<ProjectTreeItem[]> {
     const fs = await import('fs').then(m => m.promises);
@@ -224,5 +241,109 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
       },
       vscode.TreeItemCollapsibleState.None
     );
+  }
+}
+
+class AndroidProjectDragAndDropController implements vscode.TreeDragAndDropController<ProjectTreeItem> {
+  readonly dragMimeTypes = ['application/vnd.code.tree.androidProjectView', 'text/uri-list'];
+  readonly dropMimeTypes = ['application/vnd.code.tree.androidProjectView', 'text/uri-list'];
+  constructor(private readonly provider: AndroidProjectProvider) {}
+  async handleDrag(
+    source: readonly ProjectTreeItem[],
+    dataTransfer: vscode.DataTransfer
+  ): Promise<void> {
+    const uris = source
+      .map(item => item.data.resourceUri)
+      .filter((u): u is vscode.Uri => Boolean(u));
+    if (uris.length === 0) {
+      return;
+    }
+    const payload = JSON.stringify(uris.map(u => u.fsPath));
+    dataTransfer.set('application/vnd.code.tree.androidProjectView', new vscode.DataTransferItem(payload));
+    dataTransfer.set('text/uri-list', new vscode.DataTransferItem(uris.map(u => u.toString()).join('\n')));
+  }
+  async handleDrop(
+    target: ProjectTreeItem | undefined,
+    dataTransfer: vscode.DataTransfer
+  ): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage('No workspace folder open.');
+      return;
+    }
+    const targetDir = this.getTargetDirectory(target, workspaceRoot);
+    if (!targetDir) {
+      vscode.window.showErrorMessage('Select a target folder to move into.');
+      return;
+    }
+    const movedPaths = await this.getDraggedPaths(dataTransfer);
+    if (movedPaths.length === 0) {
+      return;
+    }
+    for (const srcPath of movedPaths) {
+      const baseName = path.basename(srcPath);
+      const destPath = path.join(targetDir, baseName);
+      if (destPath === srcPath) {
+        continue;
+      }
+      try {
+        await vscode.workspace.fs.rename(
+          vscode.Uri.file(srcPath),
+          vscode.Uri.file(destPath),
+          { overwrite: false }
+        );
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to move ${baseName}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+    }
+    this.provider.refresh();
+  }
+  private async getDraggedPaths(dataTransfer: vscode.DataTransfer): Promise<string[]> {
+    const internal = dataTransfer.get('application/vnd.code.tree.androidProjectView');
+    if (internal) {
+      const text = await internal.asString();
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(p => typeof p === 'string');
+        }
+      } catch {
+      }
+    }
+    const uriList = dataTransfer.get('text/uri-list');
+    if (uriList) {
+      const text = await uriList.asString();
+      return text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#'))
+        .map(line => vscode.Uri.parse(line).fsPath);
+    }
+    return [];
+  }
+  private getTargetDirectory(target: ProjectTreeItem | undefined, workspaceRoot: string): string | undefined {
+    if (!target) {
+      return workspaceRoot;
+    }
+    if (target.data.type === 'folder' || target.data.type === 'package') {
+      return target.data.resourceUri?.fsPath;
+    }
+    if (target.data.type === 'file') {
+      return target.data.resourceUri ? path.dirname(target.data.resourceUri.fsPath) : workspaceRoot;
+    }
+    if (target.data.type === 'category' && target.data.categoryId) {
+      const config = CATEGORY_CONFIGS.find(c => c.id === target.data.categoryId);
+      if (config) {
+        for (const rootPath of config.rootPaths) {
+          const fullPath = path.join(workspaceRoot, rootPath);
+          if (fs.existsSync(fullPath)) {
+            return fullPath;
+          }
+        }
+      }
+    }
+    return workspaceRoot;
   }
 }

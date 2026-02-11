@@ -139,6 +139,39 @@
         "icon": "$(add)"
       },
       {
+        "command": "android-toolkit.createClass",
+        "title": "Android: Create Class",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "android-toolkit.createFile",
+        "title": "Android: Create File",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "android-toolkit.createFolderGeneric",
+        "title": "Android: Create Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "android-toolkit.renameItem",
+        "title": "Android: Rename"
+      },
+      {
+        "command": "android-toolkit.deleteItem",
+        "title": "Android: Delete"
+      },
+      {
+        "command": "android-toolkit.createProject",
+        "title": "Android: New Project",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "android-toolkit.runAppOnEmulator",
+        "title": "Android: Run App on Emulator",
+        "icon": "$(play)"
+      },
+      {
         "command": "android-toolkit.createFolder",
         "title": "Android: Create Folder",
         "icon": "$(new-folder)"
@@ -234,6 +267,21 @@
           "group": "navigation@1"
         },
         {
+          "command": "android-toolkit.createClass",
+          "when": "view == androidProjectView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "android-toolkit.createProject",
+          "when": "view == androidProjectView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "android-toolkit.createFolderGeneric",
+          "when": "view == androidProjectView",
+          "group": "navigation@1"
+        },
+        {
           "command": "android-toolkit.refreshDeviceManager",
           "when": "view == deviceManagerView",
           "group": "navigation@2"
@@ -274,6 +322,31 @@
           "command": "android-toolkit.createAsset",
           "when": "view == androidProjectView && viewItem == category-assets",
           "group": "1_create@1"
+        },
+        {
+          "command": "android-toolkit.createClass",
+          "when": "view == androidProjectView && (viewItem == category-java || viewItem == package || viewItem == folder)",
+          "group": "1_create@4"
+        },
+        {
+          "command": "android-toolkit.createFile",
+          "when": "view == androidProjectView && (viewItem == folder || viewItem == package || viewItem =~ /folder-res/ || viewItem == category-java || viewItem == category-assets || viewItem == category-gradle)",
+          "group": "1_create@5"
+        },
+        {
+          "command": "android-toolkit.createFolderGeneric",
+          "when": "view == androidProjectView && (viewItem == folder || viewItem == package || viewItem =~ /folder-res/ || viewItem == category-java || viewItem == category-assets || viewItem == category-gradle)",
+          "group": "1_create@6"
+        },
+        {
+          "command": "android-toolkit.renameItem",
+          "when": "view == androidProjectView && (viewItem == file || viewItem == folder || viewItem == package || viewItem =~ /folder-res/)",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "android-toolkit.deleteItem",
+          "when": "view == androidProjectView && (viewItem == file || viewItem == folder || viewItem == package || viewItem =~ /folder-res/)",
+          "group": "2_manage@2"
         }
       ]
     }

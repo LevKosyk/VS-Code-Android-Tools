@@ -46,6 +46,62 @@ export async function execCommand(
     };
   }
 }
+export async function execCommandWithInput(
+  command: string,
+  args: string[] = [],
+  input: string = '',
+  options: CommandOptions = {}
+): Promise<ExecResult> {
+  const spawnOptions: SpawnOptions = {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  };
+  return new Promise<ExecResult>((resolve) => {
+    const child = spawn(command, args, spawnOptions);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timeoutId: NodeJS.Timeout | undefined;
+    const finish = (exitCode: number, overrideStderr?: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      resolve({
+        stdout: stdout.trim(),
+        stderr: (overrideStderr ?? stderr).trim(),
+        exitCode,
+      });
+    };
+    child.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+    child.on('error', (err) => {
+      finish(1, err.message);
+    });
+    child.on('close', (code) => {
+      finish(code ?? 0);
+    });
+    if (input) {
+      child.stdin?.write(input);
+    }
+    child.stdin?.end();
+    const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT;
+    timeoutId = timeoutMs
+      ? setTimeout(() => {
+          child.kill();
+          finish(1, 'Command timed out');
+        }, timeoutMs)
+      : undefined;
+  });
+}
 export function spawnProcess(
   command: string,
   args: string[] = [],

@@ -8,11 +8,7 @@ import {
 } from './jdwpConnection';
 import { 
   DebuggableProcess, 
-  DebugState, 
-  Breakpoint, 
-  StackFrame, 
-  Variable, 
-  ThreadInfo 
+  DebugState 
 } from './types';
 import { listDevices } from '../devices/deviceManager';
 export class AndroidDebugSession {
@@ -20,12 +16,15 @@ export class AndroidDebugSession {
   private _deviceId: string | null = null;
   private _processInfo: DebuggableProcess | null = null;
   private _port: number | null = null;
-  private _breakpoints: Map<string, Breakpoint[]> = new Map();
+  private _debugSession: vscode.DebugSession | null = null;
+  private _debugSessionName: string | null = null;
+  private _debugListeners: vscode.Disposable[] = [];
   private _statusBarItem: vscode.StatusBarItem | null = null;
   private _onStateChange: vscode.EventEmitter<DebugState>;
   constructor() {
     this._onStateChange = new vscode.EventEmitter<DebugState>();
     this.createStatusBarItem();
+    this.registerDebugListeners();
   }
   get state(): DebugState {
     return this._state;
@@ -80,6 +79,32 @@ export class AndroidDebugSession {
     this.updateStatusBar();
     this._onStateChange.fire(state);
   }
+  private registerDebugListeners(): void {
+    this._debugListeners.push(
+      vscode.debug.onDidStartDebugSession((session) => {
+        if (this._debugSessionName && session.name === this._debugSessionName) {
+          this._debugSession = session;
+          this.setState('running');
+        }
+      }),
+      vscode.debug.onDidTerminateDebugSession(async (session) => {
+        if (this._debugSession && session.id === this._debugSession.id) {
+          await this.cleanupAfterDebug();
+        }
+      })
+    );
+  }
+  private async cleanupAfterDebug(): Promise<void> {
+    if (this._deviceId && this._port) {
+      await removeJdwpForward(this._deviceId, this._port);
+    }
+    this._deviceId = null;
+    this._processInfo = null;
+    this._port = null;
+    this._debugSession = null;
+    this._debugSessionName = null;
+    this.setState('disconnected');
+  }
   async selectDevice(): Promise<string | undefined> {
     const devices = await listDevices();
     const onlineDevices = devices.filter(d => d.status === 'online');
@@ -125,6 +150,14 @@ export class AndroidDebugSession {
     }
     this.setState('connecting');
     try {
+      const javaDebug = vscode.extensions.getExtension('vscjava.vscode-java-debug');
+      if (!javaDebug) {
+        this.setState('disconnected');
+        vscode.window.showErrorMessage(
+          'Java Debugger extension not found. Install "Debugger for Java" to use Android debugging.'
+        );
+        return false;
+      }
       const deviceId = await this.selectDevice();
       if (!deviceId) {
         this.setState('disconnected');
@@ -145,6 +178,24 @@ export class AndroidDebugSession {
       this._deviceId = deviceId;
       this._processInfo = process;
       this._port = localPort;
+      this._debugSessionName = `Android JDWP: ${process.packageName}`;
+      await javaDebug.activate();
+      const started = await vscode.debug.startDebugging(
+        undefined,
+        {
+          type: 'java',
+          name: this._debugSessionName,
+          request: 'attach',
+          hostName: '127.0.0.1',
+          port: localPort,
+        }
+      );
+      if (!started) {
+        await removeJdwpForward(deviceId, localPort);
+        this.setState('disconnected');
+        vscode.window.showErrorMessage('Failed to start Java debug session.');
+        return false;
+      }
       this.setState('attached');
       vscode.window.showInformationMessage(
         `Debugger attached to ${process.packageName} (PID: ${process.pid})`
@@ -162,14 +213,13 @@ export class AndroidDebugSession {
     if (!this.isAttached) {
       return;
     }
-    if (this._deviceId && this._port) {
-      await removeJdwpForward(this._deviceId, this._port);
-    }
     const packageName = this._processInfo?.packageName;
-    this._deviceId = null;
-    this._processInfo = null;
-    this._port = null;
-    this.setState('disconnected');
+    if (this._debugSession) {
+      await vscode.debug.stopDebugging(this._debugSession);
+      vscode.window.showInformationMessage(`Debugger detached from ${packageName || 'app'}`);
+      return;
+    }
+    await this.cleanupAfterDebug();
     vscode.window.showInformationMessage(`Debugger detached from ${packageName || 'app'}`);
   }
   async toggleBreakpoint(): Promise<void> {
@@ -178,41 +228,12 @@ export class AndroidDebugSession {
       vscode.window.showWarningMessage('No active editor');
       return;
     }
-    const file = editor.document.uri.fsPath;
-    const line = editor.selection.active.line + 1; 
     const lang = editor.document.languageId;
     if (lang !== 'java' && lang !== 'kotlin') {
       vscode.window.showWarningMessage('Breakpoints only supported in Java/Kotlin files');
       return;
     }
-    let fileBreakpoints = this._breakpoints.get(file) || [];
-    const existingIndex = fileBreakpoints.findIndex(bp => bp.line === line);
-    if (existingIndex >= 0) {
-      fileBreakpoints.splice(existingIndex, 1);
-      vscode.window.showInformationMessage(`Breakpoint removed at line ${line}`);
-    } else {
-      const bp: Breakpoint = {
-        id: Date.now(),
-        file,
-        line,
-        verified: this.isAttached, 
-      };
-      fileBreakpoints.push(bp);
-      vscode.window.showInformationMessage(`Breakpoint added at line ${line}`);
-    }
-    this._breakpoints.set(file, fileBreakpoints);
-    this.updateBreakpointDecorations(editor);
-  }
-  private updateBreakpointDecorations(editor: vscode.TextEditor): void {
-    const file = editor.document.uri.fsPath;
-    const breakpoints = this._breakpoints.get(file) || [];
-  }
-  getBreakpoints(): Breakpoint[] {
-    const all: Breakpoint[] = [];
-    for (const bps of this._breakpoints.values()) {
-      all.push(...bps);
-    }
-    return all;
+    await vscode.commands.executeCommand('editor.debug.action.toggleBreakpoint');
   }
   showStatus(): void {
     if (this.isAttached) {
@@ -239,6 +260,7 @@ export class AndroidDebugSession {
     this.detach();
     this._statusBarItem?.dispose();
     this._onStateChange.dispose();
+    this._debugListeners.forEach(d => d.dispose());
   }
 }
 export const debugSession = new AndroidDebugSession();

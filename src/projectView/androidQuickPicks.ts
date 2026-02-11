@@ -197,7 +197,6 @@ const VALUES_FILE_TYPES: ValuesFileItem[] = [
     fileName: 'strings.xml',
     template: `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Add your localized strings here -->
 </resources>
 `,
   },
@@ -207,7 +206,6 @@ const VALUES_FILE_TYPES: ValuesFileItem[] = [
     fileName: 'arrays.xml',
     template: `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Add your localized arrays here -->
 </resources>
 `,
   },
@@ -217,7 +215,6 @@ const VALUES_FILE_TYPES: ValuesFileItem[] = [
     fileName: 'plurals.xml',
     template: `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Add your localized plurals here -->
 </resources>
 `,
   },
@@ -282,7 +279,6 @@ export function getResourceTemplate(type: ResourceFolderType, fileName: string):
         return `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
-        <!-- Customize your theme here -->
     </style>
 </resources>
 `;

@@ -50,7 +50,6 @@ export class AndroidXmlSymbolProvider implements vscode.DocumentSymbolProvider {
       const endPos = document.positionAt(match.index + fullMatch.length);
       const idMatch = attributes.match(/android:id\s*=\s*"@\+?id\/([^"]+)"/);
       const id = idMatch ? idMatch[1] : undefined;
-      // Create symbol
       const label = id ? `${tagName} (@${id})` : tagName;
       const symbol = new vscode.DocumentSymbol(
         label,
@@ -59,28 +58,22 @@ export class AndroidXmlSymbolProvider implements vscode.DocumentSymbolProvider {
         new vscode.Range(startPos, endPos),
         new vscode.Range(startPos, endPos)
       );
-      // Add to parent or root
       if (tagStack.length > 0) {
         tagStack[tagStack.length - 1].symbol.children.push(symbol);
       } else {
         symbols.push(symbol);
       }
-      // Push to stack if not self-closing
       if (!selfClosing) {
         tagStack.push({ symbol, indent: startPos.character });
       }
     }
     return symbols;
   }
-  /**
-   * Parse values XML (strings, colors, dimens)
-   */
   private parseValues(
     document: vscode.TextDocument,
     text: string
   ): vscode.DocumentSymbol[] {
     const symbols: vscode.DocumentSymbol[] = [];
-    // Match resource elements
     const resourceRegex = /<(string|color|dimen|style|integer|bool|array|string-array|integer-array|plurals|item)\s+name\s*=\s*"([^"]+)"[^>]*>/g;
     let match: RegExpExecArray | null;
     while ((match = resourceRegex.exec(text)) !== null) {
@@ -118,7 +111,6 @@ export class AndroidXmlSymbolProvider implements vscode.DocumentSymbolProvider {
         new vscode.Range(pos, pos)
       ));
     }
-    // Components
     const componentTypes = ['activity', 'service', 'receiver', 'provider'];
     for (const componentType of componentTypes) {
       const regex = new RegExp(`<${componentType}[^>]*android:name\\s*=\\s*"([^"]+)"[^>]*>`, 'g');

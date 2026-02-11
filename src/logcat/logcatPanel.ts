@@ -259,12 +259,11 @@ export class LogcatPanel {
     <input type="text" id="searchFilter" placeholder="Search...">
     <span id="status" class="status">Stopped</span>
   </div>
-  <div class="log-container" id="logContainer">
-    <div class="empty-state">Select a device and click Start to view logs</div>
-  </div>
+    <div class="log-container" id="logContainer">
+      <div class="empty-state">Select a device and click Start to view logs</div>
+    </div>
   <script>
     const vscode = acquireVsCodeApi();
-    // Elements
     const deviceSelect = document.getElementById('deviceSelect');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -276,9 +275,7 @@ export class LogcatPanel {
     const logContainer = document.getElementById('logContainer');
     let isRunning = false;
     let autoScroll = true;
-    // Request device list on load
     vscode.postMessage({ type: 'getDevices' });
-    // Event listeners
     startBtn.addEventListener('click', () => {
       const deviceId = deviceSelect.value;
       if (deviceId) {
@@ -322,7 +319,6 @@ export class LogcatPanel {
         timeout = setTimeout(() => fn(...args), ms);
       };
     }
-    // Handle messages from extension
     window.addEventListener('message', (event) => {
       const message = event.data;
       switch (message.type) {

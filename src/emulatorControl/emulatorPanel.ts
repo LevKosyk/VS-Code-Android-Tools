@@ -530,7 +530,6 @@ export class EmulatorControlPanel {
       <p>Start an emulator to use these controls</p>
     </div>
     <div id="controlPanel" style="display: none;">
-      <!-- Header -->
       <div class="header">
         <select id="deviceSelect"></select>
         <span class="status-indicator running" id="statusIndicator">
@@ -539,7 +538,6 @@ export class EmulatorControlPanel {
         </span>
         <button class="icon-btn" onclick="refresh()" title="Refresh">↻</button>
       </div>
-      <!-- Device Info -->
       <div class="section">
         <div class="section-title">Device Info</div>
         <div class="info-grid" id="infoGrid">
@@ -551,7 +549,6 @@ export class EmulatorControlPanel {
           <div class="info-item"><div class="info-label">Battery</div><div class="info-value" id="infoBat">-</div></div>
         </div>
       </div>
-      <!-- Screen Controls -->
       <div class="section">
         <div class="section-title">Screen</div>
         <div class="btn-grid">
@@ -560,7 +557,6 @@ export class EmulatorControlPanel {
           <button class="btn" id="recordBtn" onclick="toggleRecording()">Record</button>
         </div>
       </div>
-      <!-- Actions -->
       <div class="section">
         <div class="section-title">Actions</div>
         <div class="btn-grid">
@@ -569,7 +565,6 @@ export class EmulatorControlPanel {
           <button class="btn danger" onclick="send('wipeData')">Wipe Data</button>
         </div>
       </div>
-      <!-- App Management -->
       <div class="section">
         <div class="section-title">App Management</div>
         <div class="btn-grid">
@@ -578,7 +573,6 @@ export class EmulatorControlPanel {
           <button class="btn" onclick="send('restartApp')">Restart App</button>
         </div>
       </div>
-      <!-- Location -->
       <div class="section">
         <div class="section-title">Location</div>
         <div class="location-form">
@@ -593,7 +587,6 @@ export class EmulatorControlPanel {
           <button class="btn" onclick="send('setLocationPreset', 'tokyo')">Tokyo</button>
         </div>
       </div>
-      <!-- Network -->
       <div class="section">
         <div class="section-title">Network</div>
         <div class="network-row">
@@ -608,7 +601,6 @@ export class EmulatorControlPanel {
           </select>
         </div>
       </div>
-      <!-- Battery -->
       <div class="section">
         <div class="section-title">Battery Simulation</div>
         <div class="battery-control">
@@ -706,20 +698,15 @@ export class EmulatorControlPanel {
         else if (d.state === 'booting') statusText = 'Booting...';
         else statusText = 'Offline';
         document.getElementById('statusText').textContent = statusText;
-        // Disable/Enable buttons based on state
         const isBooting = d.state === 'booting';
-        const btns = document.querySelectorAll('.btn:not(.danger)'); // Keep wipe data enabled? Maybe not.
+        const btns = document.querySelectorAll('.btn:not(.danger)');
         btns.forEach(b => {
-             // specific logic could go here, for now disable most non-essential
-             if (b.id !== 'networkToggle') { // example exception
+             if (b.id !== 'networkToggle') {
                  (b as HTMLButtonElement).disabled = isBooting;
              }
         });
-        // Simpler approach: disable all action buttons if booting
         const actions = document.querySelectorAll('.btn');
         actions.forEach(b => {
-             // Allow cold/warm boot and wipe data even if booting (recovery)
-             // context dependent, but safe to disable most
              const text = b.textContent;
              if (text !== 'Cold Boot' && text !== 'Warm Boot' && text !== 'Wipe Data') {
                  (b as HTMLButtonElement).disabled = isBooting;

@@ -13,6 +13,13 @@ import {
   createAssetFlow,
   createLocaleFlow,
 } from './projectView/androidCreator';
+import {
+  createFileCommand,
+  createFolderCommand,
+  renameItemCommand,
+  deleteItemCommand,
+} from './projectView/fileActions';
+import { createAndroidProjectWizard } from './projectView/projectCreator';
 import { EmulatorControlProvider } from './emulatorControl/emulatorControlProvider';
 import { EmulatorControlPanel } from './emulatorControl/emulatorPanel';
 import {
@@ -50,6 +57,10 @@ import {
   pickDeviceProfile, 
   inputAvdName 
 } from './ui/quickPicks';
+import { execCommand } from './core/cli';
+import { findApplicationId } from './core/androidProject';
+import * as path from 'path';
+import * as fs from 'fs';
 function handleError(error: unknown): void {
   if (error instanceof AndroidToolsError) {
     showToolkitError(error);
@@ -199,6 +210,87 @@ async function createEmulatorCommand(): Promise<void> {
     handleError(error);
   }
 }
+function getGradleCommand(workspaceRoot: string): string {
+  const wrapper = process.platform === 'win32' ? 'gradlew.bat' : 'gradlew';
+  const wrapperPath = path.join(workspaceRoot, wrapper);
+  if (fs.existsSync(wrapperPath)) {
+    return wrapperPath;
+  }
+  return 'gradle';
+}
+async function assembleDebug(workspaceRoot: string): Promise<boolean> {
+  const gradleCmd = getGradleCommand(workspaceRoot);
+  const result = await execCommand(gradleCmd, ['assembleDebug'], {
+    cwd: workspaceRoot,
+    timeout: 300_000,
+  });
+  return result.exitCode === 0;
+}
+function findDebugApk(workspaceRoot: string): string | undefined {
+  const debugDir = path.join(workspaceRoot, 'app', 'build', 'outputs', 'apk', 'debug');
+  if (!fs.existsSync(debugDir)) {
+    return undefined;
+  }
+  const files = fs.readdirSync(debugDir).filter(f => f.endsWith('.apk'));
+  if (files.length === 0) {
+    return undefined;
+  }
+  const fullPaths = files.map(f => path.join(debugDir, f));
+  fullPaths.sort((a, b) => {
+    const aTime = fs.statSync(a).mtimeMs;
+    const bTime = fs.statSync(b).mtimeMs;
+    return bTime - aTime;
+  });
+  return fullPaths[0];
+}
+async function runAppOnEmulator(): Promise<void> {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const emulators = await listRunningEmulators();
+  if (emulators.length === 0) {
+    showWarning('No running emulators. Start an emulator first.');
+    return;
+  }
+  const targetDevice = emulators.length === 1
+    ? emulators[0]
+    : await pickDevice(emulators, { title: 'Select Emulator', placeholder: 'Choose a running emulator' });
+  if (!targetDevice) {
+    return;
+  }
+  const built = await withProgress('Building debug APK...', async () => {
+    return assembleDebug(workspaceFolder.uri.fsPath);
+  });
+  if (!built) {
+    showError('Failed to build debug APK.');
+    return;
+  }
+  const apkPath = findDebugApk(workspaceFolder.uri.fsPath);
+  if (!apkPath) {
+    showError('Debug APK not found. Run a build and try again.');
+    return;
+  }
+  await withProgress('Installing APK...', async () => {
+    const result = await AdbService.installApk(targetDevice.id, apkPath);
+    result.success ? showInfo(result.message) : showError(result.message);
+  });
+  let packageName = findApplicationId(workspaceFolder.uri.fsPath);
+  if (!packageName) {
+    packageName = await vscode.window.showInputBox({
+      prompt: 'Application package name (applicationId)',
+      placeHolder: 'com.example.app',
+    });
+  }
+  if (!packageName) {
+    return;
+  }
+  await withProgress('Starting app...', async () => {
+    const result = await AdbService.startApp(targetDevice.id, packageName);
+    result.success ? showInfo(result.message) : showError(result.message);
+  });
+}
 function createEmulatorControlCommands(
   controlProvider: EmulatorControlProvider
 ): vscode.Disposable[] {
@@ -334,6 +426,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const projectTreeView = vscode.window.createTreeView('androidProjectView', {
     treeDataProvider: projectProvider,
     showCollapseAll: true,
+    dragAndDropController: projectProvider.dragAndDropController,
   });
   context.subscriptions.push(projectTreeView);
   const controlProvider = new EmulatorControlProvider();
@@ -392,6 +485,24 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.createClass', (item?: ProjectTreeItem) => {
       const { createClassFlow } = require('./projectView/androidCreator');
       createClassFlow(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.createFile', (item?: ProjectTreeItem) => {
+      createFileCommand(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.createFolderGeneric', (item?: ProjectTreeItem) => {
+      createFolderCommand(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.renameItem', (item?: ProjectTreeItem) => {
+      renameItemCommand(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.deleteItem', (item?: ProjectTreeItem) => {
+      deleteItemCommand(item, projectProvider);
+    }),
+    vscode.commands.registerCommand('android-toolkit.createProject', () => {
+      createAndroidProjectWizard();
+    }),
+    vscode.commands.registerCommand('android-toolkit.runAppOnEmulator', () => {
+      runAppOnEmulator();
     }),
     vscode.commands.registerCommand('android-toolkit.refreshDeviceManager', () => deviceManagerProvider.refresh()),
     vscode.commands.registerCommand('android-toolkit.createDevice', (platform?: string) => {
@@ -536,10 +647,45 @@ export function activate(context: vscode.ExtensionContext): void {
         showWarning('No running emulators.');
         return;
       }
-      const level = await vscode.window.showInputBox({ prompt: 'Battery level (0-100)', value: '50' });
-      if (level) {
-        const result = await AdbService.setBatteryLevel(emulators[0].id, parseInt(level, 10));
-        result.success ? showInfo(result.message) : showError(result.message);
+      const levelInput = await vscode.window.showInputBox({
+        prompt: 'Battery level (0-100)',
+        value: '50',
+        validateInput: (value) => {
+          if (value.trim() === '') {
+            return 'Enter a value between 0 and 100';
+          }
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+            return 'Battery level must be between 0 and 100';
+          }
+          return undefined;
+        },
+      });
+      if (levelInput === undefined) {
+        return;
+      }
+      const statusPick = await vscode.window.showQuickPick(
+        [
+          { label: 'Charging', value: 'charging' },
+          { label: 'Discharging', value: 'discharging' },
+          { label: 'Not Charging', value: 'not-charging' },
+          { label: 'Full', value: 'full' },
+          { label: 'Leave Status Unchanged', value: 'unchanged' },
+        ],
+        { placeHolder: 'Set battery status' }
+      );
+      if (!statusPick) {
+        return;
+      }
+      const level = parseInt(levelInput, 10);
+      const levelResult = await AdbService.setBatteryLevel(emulators[0].id, level);
+      levelResult.success ? showInfo(levelResult.message) : showError(levelResult.message);
+      if (statusPick.value !== 'unchanged') {
+        const statusResult = await AdbService.setBatteryStatus(
+          emulators[0].id,
+          statusPick.value as 'charging' | 'discharging' | 'not-charging' | 'full'
+        );
+        statusResult.success ? showInfo(statusResult.message) : showError(statusResult.message);
       }
     }),
     vscode.commands.registerCommand('android-toolkit.openFile', async (uriOrPath: vscode.Uri | string) => {
