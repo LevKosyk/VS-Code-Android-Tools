@@ -1,9 +1,9 @@
 {
-  "name": "android-tools",
-  "displayName": "Android Tools for VS Code",
+  "name": "vscode-android-tools",
+  "displayName": "VS Code Android Tools",
   "description": "Fast, lightweight Android device and emulator management using CLI tools",
   "version": "0.1.0",
-  "publisher": "android-tools",
+  "publisher": "levkosyk",
   "repository": {
     "type": "git",
     "url": "https://github.com/android-tools/vscode-android-tools"
