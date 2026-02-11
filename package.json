@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "VS Code Android Tools",
   "description": "Fast, lightweight Android device and emulator management using CLI tools",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "publisher": "levkosyk",
   "icon": "assets/logo/logo.png",
   "repository": {
@@ -44,10 +44,22 @@
           "contextualTitle": "Device Manager"
         },
         {
+          "id": "deviceFileExplorerView",
+          "name": "Device Explorer",
+          "icon": "$(folder-opened)",
+          "contextualTitle": "Device Explorer"
+        },
+        {
           "id": "emulatorControlView",
           "name": "Emulator Control",
           "icon": "$(vm)",
           "contextualTitle": "Emulator Control"
+        },
+        {
+          "id": "androidToolkitGradleTasksView",
+          "name": "Gradle Tasks",
+          "icon": "$(tools)",
+          "contextualTitle": "Gradle Tasks"
         }
       ]
     },
@@ -173,6 +185,208 @@
         "icon": "$(play)"
       },
       {
+        "command": "android-toolkit.runAppOnDevice",
+        "title": "Android: Run App on Device",
+        "icon": "$(play)"
+      },
+      {
+        "command": "android-toolkit.openRunPanel",
+        "title": "Android: Open Run Panel",
+        "icon": "$(play)"
+      },
+      {
+        "command": "android-toolkit.selectBuildVariant",
+        "title": "Android: Select Build Variant"
+      },
+      {
+        "command": "android-toolkit.gradleAssembleDebug",
+        "title": "Android: Gradle Assemble Debug"
+      },
+      {
+        "command": "android-toolkit.gradleInstallDebug",
+        "title": "Android: Gradle Install Debug"
+      },
+      {
+        "command": "android-toolkit.gradleClean",
+        "title": "Android: Gradle Clean"
+      },
+      {
+        "command": "android-toolkit.refreshGradleTasks",
+        "title": "Android: Refresh Gradle Tasks",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.runGradleTask",
+        "title": "Android: Run Gradle Task"
+      },
+      {
+        "command": "android-toolkit.createLaunchProfile",
+        "title": "Android: Create Launch Profile"
+      },
+      {
+        "command": "android-toolkit.runLaunchProfile",
+        "title": "Android: Run Launch Profile"
+      },
+      {
+        "command": "android-toolkit.deleteLaunchProfile",
+        "title": "Android: Delete Launch Profile"
+      },
+      {
+        "command": "android-toolkit.analyzeApk",
+        "title": "Android: APK Analyzer",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "android-toolkit.compareApk",
+        "title": "Android: Compare APKs",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "android-toolkit.signingWizard",
+        "title": "Android: Signing Wizard"
+      },
+      {
+        "command": "android-toolkit.buildSignedApk",
+        "title": "Android: Build Signed APK"
+      },
+      {
+        "command": "android-toolkit.buildSignedBundle",
+        "title": "Android: Build Signed AAB"
+      },
+      {
+        "command": "android-toolkit.openAppInspection",
+        "title": "Android: App Inspection",
+        "icon": "$(search)"
+      },
+      {
+        "command": "android-toolkit.openDatabaseInspector",
+        "title": "Android: Database Inspector",
+        "icon": "$(database)"
+      },
+      {
+        "command": "android-toolkit.openDebugPanel",
+        "title": "Android: Debug Panel",
+        "icon": "$(debug)"
+      },
+      {
+        "command": "android-toolkit.openAdbShell",
+        "title": "Android: Open ADB Shell",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "android-toolkit.openLayoutPreview",
+        "title": "Android: Preview Layout",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.openLayoutInspector",
+        "title": "Android: Layout Inspector",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.emulator.saveSnapshot",
+        "title": "Android: Save Emulator Snapshot"
+      },
+      {
+        "command": "android-toolkit.emulator.loadSnapshot",
+        "title": "Android: Load Emulator Snapshot"
+      },
+      {
+        "command": "android-toolkit.validateManifest",
+        "title": "Android: Validate Manifest"
+      },
+      {
+        "command": "android-toolkit.insertManifestTemplate",
+        "title": "Android: Insert Manifest Template"
+      },
+      {
+        "command": "android-toolkit.addManifestEntry",
+        "title": "Android: Add Manifest Entry"
+      },
+      {
+        "command": "android-toolkit.openManifestEditor",
+        "title": "Android: Open Manifest Editor"
+      },
+      {
+        "command": "android-toolkit.validateResources",
+        "title": "Android: Validate Resources"
+      },
+      {
+        "command": "android-toolkit.insertValuesTemplate",
+        "title": "Android: Insert Values Template"
+      },
+      {
+        "command": "android-toolkit.openResourceInspector",
+        "title": "Android: Resource Inspector"
+      },
+      {
+        "command": "android-toolkit.openResourceByQuery",
+        "title": "Android: Go To Resource (R.)"
+      },
+      {
+        "command": "android-toolkit.selectDevice",
+        "title": "Android: Select Device"
+      },
+      {
+        "command": "android-toolkit.selectModule",
+        "title": "Android: Select Module"
+      },
+      {
+        "command": "android-toolkit.runAppOnTargetSelected",
+        "title": "Android: Run (Selected Target)"
+      },
+      {
+        "command": "android-toolkit.stopApp",
+        "title": "Android: Stop App"
+      },
+      {
+        "command": "android-toolkit.gradleSync",
+        "title": "Android: Gradle Sync"
+      },
+      {
+        "command": "android-toolkit.projectHealth",
+        "title": "Android: Project Health Check"
+      },
+      {
+        "command": "android-toolkit.deviceExplorer.refresh",
+        "title": "Android: Refresh Device Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.deviceExplorer.pull",
+        "title": "Android: Pull From Device"
+      },
+      {
+        "command": "android-toolkit.deviceExplorer.push",
+        "title": "Android: Push To Device"
+      },
+      {
+        "command": "android-toolkit.deviceExplorer.delete",
+        "title": "Android: Delete From Device"
+      },
+      {
+        "command": "android-toolkit.runAppOnDevice",
+        "title": "Android: Run App on Device",
+        "icon": "$(play)"
+      },
+      {
+        "command": "android-toolkit.gradleAssembleDebug",
+        "title": "Android: Gradle Assemble Debug"
+      },
+      {
+        "command": "android-toolkit.gradleInstallDebug",
+        "title": "Android: Gradle Install Debug"
+      },
+      {
+        "command": "android-toolkit.gradleClean",
+        "title": "Android: Gradle Clean"
+      },
+      {
+        "command": "android-toolkit.openRunPanel",
+        "title": "Android: Open Run Panel",
+        "icon": "$(play)"
+      },
+      {
         "command": "android-toolkit.createFolder",
         "title": "Android: Create Folder",
         "icon": "$(new-folder)"
@@ -278,6 +492,16 @@
           "group": "navigation@0"
         },
         {
+          "command": "android-toolkit.openRunPanel",
+          "when": "view == androidProjectView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "android-toolkit.runAppOnDevice",
+          "when": "view == androidProjectView",
+          "group": "navigation@0"
+        },
+        {
           "command": "android-toolkit.createFolderGeneric",
           "when": "view == androidProjectView",
           "group": "navigation@1"
@@ -293,8 +517,18 @@
           "group": "navigation@1"
         },
         {
+          "command": "android-toolkit.deviceExplorer.refresh",
+          "when": "view == deviceFileExplorerView",
+          "group": "navigation@1"
+        },
+        {
           "command": "android-toolkit.refreshEmulatorControl",
           "when": "view == emulatorControlView",
+          "group": "navigation"
+        },
+        {
+          "command": "android-toolkit.refreshGradleTasks",
+          "when": "view == androidToolkitGradleTasksView",
           "group": "navigation"
         }
       ],
@@ -348,6 +582,26 @@
           "command": "android-toolkit.deleteItem",
           "when": "view == androidProjectView && (viewItem == file || viewItem == folder || viewItem == package || viewItem =~ /folder-res/)",
           "group": "2_manage@2"
+        },
+        {
+          "command": "android-toolkit.runGradleTask",
+          "when": "view == androidToolkitGradleTasksView && viewItem == task",
+          "group": "navigation"
+        },
+        {
+          "command": "android-toolkit.deviceExplorer.pull",
+          "when": "view == deviceFileExplorerView && (viewItem == file || viewItem == folder)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "android-toolkit.deviceExplorer.push",
+          "when": "view == deviceFileExplorerView && (viewItem == device || viewItem == folder)",
+          "group": "navigation@2"
+        },
+        {
+          "command": "android-toolkit.deviceExplorer.delete",
+          "when": "view == deviceFileExplorerView && (viewItem == file || viewItem == folder)",
+          "group": "navigation@3"
         }
       ]
     }

@@ -228,6 +228,11 @@ export async function stopDevice(
       `Stopping ${device.name}...`,
       async () => {
         if (device.platform === 'android') {
+          try {
+            const { saveSnapshot } = require('../emulatorControl/emulatorCommands');
+            await saveSnapshot(device.id, 'auto');
+          } catch {
+          }
           await stopEmulator(device.id);
         } else {
           await shutdownSimulator(device.platformId);

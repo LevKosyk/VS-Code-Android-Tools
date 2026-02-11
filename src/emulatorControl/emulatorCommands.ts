@@ -222,3 +222,51 @@ export async function getAvdNameForDevice(deviceId: string): Promise<string | un
   }
   return undefined;
 }
+
+export async function listSnapshots(deviceId: string): Promise<string[]> {
+  const sdk = detectSdk();
+  try {
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'emu', 'avd', 'snapshot', 'list'
+    ]);
+    if (result.exitCode !== 0) {
+      return [];
+    }
+    return result.stdout
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l && !l.toLowerCase().includes('snapshot'));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveSnapshot(deviceId: string, name: string): Promise<ActionResult> {
+  const sdk = detectSdk();
+  try {
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'emu', 'avd', 'snapshot', 'save', name
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: result.stderr || 'Failed to save snapshot' };
+    }
+    return { success: true, message: `Snapshot saved: ${name}` };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Failed to save snapshot' };
+  }
+}
+
+export async function loadSnapshot(deviceId: string, name: string): Promise<ActionResult> {
+  const sdk = detectSdk();
+  try {
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'emu', 'avd', 'snapshot', 'load', name
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: result.stderr || 'Failed to load snapshot' };
+    }
+    return { success: true, message: `Snapshot loaded: ${name}` };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Failed to load snapshot' };
+  }
+}

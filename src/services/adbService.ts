@@ -174,6 +174,107 @@ class AdbServiceClass {
       .filter(line => line.startsWith('package:'))
       .map(line => line.replace('package:', '').trim());
   }
+  async listProcesses(deviceId: string): Promise<Array<{ pid: number; name: string; user?: string }>> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'ps', '-A'
+    ]);
+    if (result.exitCode !== 0) {
+      return [];
+    }
+    const lines = result.stdout.split('\n').filter(l => l.trim().length > 0);
+    if (lines.length === 0) {
+      return [];
+    }
+    const header = lines[0].trim().split(/\s+/);
+    const pidIndex = header.indexOf('PID');
+    const nameIndex = header.indexOf('NAME') !== -1 ? header.indexOf('NAME') : header.indexOf('CMDLINE');
+    const userIndex = header.indexOf('USER');
+    const processes: Array<{ pid: number; name: string; user?: string }> = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].trim().split(/\s+/);
+      if (pidIndex === -1 || nameIndex === -1 || parts.length <= nameIndex) {
+        continue;
+      }
+      const pid = parseInt(parts[pidIndex], 10);
+      const name = parts[nameIndex];
+      const user = userIndex !== -1 ? parts[userIndex] : undefined;
+      if (!Number.isNaN(pid) && name) {
+        processes.push({ pid, name, user });
+      }
+    }
+    return processes;
+  }
+  async getPackageDetails(deviceId: string, packageName: string): Promise<{
+    packageName: string;
+    versionName?: string;
+    versionCode?: string;
+    firstInstallTime?: string;
+    lastUpdateTime?: string;
+  }> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'dumpsys', 'package', packageName
+    ]);
+    if (result.exitCode !== 0) {
+      return { packageName };
+    }
+    const output = result.stdout;
+    const versionName = output.match(/versionName=([^\s]+)/)?.[1];
+    const versionCode = output.match(/versionCode=([^\s]+)/)?.[1];
+    const firstInstallTime = output.match(/firstInstallTime=([^\n]+)/)?.[1]?.trim();
+    const lastUpdateTime = output.match(/lastUpdateTime=([^\n]+)/)?.[1]?.trim();
+    return { packageName, versionName, versionCode, firstInstallTime, lastUpdateTime };
+  }
+  async listDatabases(deviceId: string, packageName: string): Promise<string[]> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'run-as', packageName, 'ls', 'databases'
+    ]);
+    if (result.exitCode !== 0) {
+      return [];
+    }
+    return result.stdout
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean);
+  }
+  async pullDatabase(deviceId: string, packageName: string, dbName: string, localDir: string): Promise<boolean> {
+    const sdk = detectSdk();
+    const tempPath = `/data/data/${packageName}/files/__android_tools_tmp.db`;
+    const copyResult = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'run-as', packageName, 'sh', '-c',
+      `cat databases/${dbName} > ${tempPath}`
+    ]);
+    if (copyResult.exitCode !== 0) {
+      return false;
+    }
+    const pullResult = await execCommand(sdk.adb, [
+      '-s', deviceId, 'pull', tempPath, localDir
+    ], { timeout: 120_000 });
+    await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'run-as', packageName, 'rm', '-f', tempPath]);
+    return pullResult.exitCode === 0;
+  }
+  async listTables(deviceId: string, packageName: string, dbName: string): Promise<string[]> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'run-as', packageName, 'sqlite3', `databases/${dbName}`, '.tables'
+    ]);
+    if (result.exitCode !== 0) {
+      return [];
+    }
+    return result.stdout
+      .split(/\s+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+  }
+  async queryDatabase(deviceId: string, packageName: string, dbName: string, query: string): Promise<string> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'run-as', packageName, 'sqlite3', `databases/${dbName}`, query
+    ], { timeout: 120_000 });
+    return result.exitCode === 0 ? result.stdout : result.stderr;
+  }
   async startScreenRecording(deviceId: string): Promise<ServiceResult<RecordingSession>> {
     if (this.activeRecordings.has(deviceId)) {
       return { 

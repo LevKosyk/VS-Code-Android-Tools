@@ -7,12 +7,14 @@ export class LogcatPanel {
   private static readonly viewType = 'androidLogcat';
   private readonly panel: vscode.WebviewPanel;
   private readonly extensionUri: vscode.Uri;
+  private readonly context: vscode.ExtensionContext;
   private stream: LogcatStream | null = null;
   private filter: LogFilter = { ...DEFAULT_FILTER };
   private disposables: vscode.Disposable[] = [];
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
     this.panel = panel;
     this.extensionUri = extensionUri;
+    this.context = context;
     this.panel.webview.html = this.getHtmlContent();
     this.panel.webview.onDidReceiveMessage(
       message => this.handleMessage(message),
@@ -21,7 +23,7 @@ export class LogcatPanel {
     );
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
   }
-  public static createOrShow(extensionUri: vscode.Uri): LogcatPanel {
+  public static createOrShow(extensionUri: vscode.Uri, context: vscode.ExtensionContext): LogcatPanel {
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
@@ -38,7 +40,7 @@ export class LogcatPanel {
         retainContextWhenHidden: true,
       }
     );
-    LogcatPanel.currentPanel = new LogcatPanel(panel, extensionUri);
+    LogcatPanel.currentPanel = new LogcatPanel(panel, extensionUri, context);
     return LogcatPanel.currentPanel;
   }
   private async handleMessage(message: { type: string; [key: string]: unknown }): Promise<void> {
@@ -62,7 +64,103 @@ export class LogcatPanel {
         await vscode.env.clipboard.writeText(message.text as string);
         vscode.window.showInformationMessage('Log line copied to clipboard');
         break;
+      case 'getPresets':
+        this.sendPresets();
+        break;
+      case 'savePreset':
+        this.savePreset(message.name as string, message.filter as LogFilter);
+        break;
+      case 'deletePreset':
+        this.deletePreset(message.name as string);
+        break;
+      case 'applyPreset':
+        this.applyPreset(message.name as string);
+        break;
+      case 'getSessions':
+        this.sendSessions();
+        break;
+      case 'saveSession':
+        this.saveSession(message.name as string, message.deviceId as string, message.filter as LogFilter);
+        break;
+      case 'runSession':
+        this.runSession(message.name as string);
+        break;
     }
+  }
+  private getPresets(): Array<{ name: string; filter: LogFilter }> {
+    return this.context.globalState.get('android-tools.logcatPresets', []);
+  }
+  private updatePresets(presets: Array<{ name: string; filter: LogFilter }>): void {
+    this.context.globalState.update('android-tools.logcatPresets', presets);
+  }
+  private sendPresets(): void {
+    const presets = this.getPresets();
+    this.postMessage({ type: 'presets', presets });
+  }
+  private savePreset(name: string, filter: LogFilter): void {
+    if (!name) {
+      return;
+    }
+    const presets = this.getPresets();
+    const existing = presets.findIndex(p => p.name === name);
+    if (existing >= 0) {
+      presets[existing] = { name, filter };
+    } else {
+      presets.push({ name, filter });
+    }
+    this.updatePresets(presets);
+    this.sendPresets();
+  }
+  private deletePreset(name: string): void {
+    if (!name) {
+      return;
+    }
+    const presets = this.getPresets().filter(p => p.name !== name);
+    this.updatePresets(presets);
+    this.sendPresets();
+  }
+  private applyPreset(name: string): void {
+    const presets = this.getPresets();
+    const preset = presets.find(p => p.name === name);
+    if (!preset) {
+      return;
+    }
+    this.setFilter(preset.filter);
+    this.postMessage({ type: 'presetApplied', filter: preset.filter });
+  }
+  private getSessions(): Array<{ name: string; deviceId: string; filter: LogFilter }> {
+    return this.context.globalState.get('android-tools.logcatSessions', []);
+  }
+  private updateSessions(sessions: Array<{ name: string; deviceId: string; filter: LogFilter }>): void {
+    this.context.globalState.update('android-tools.logcatSessions', sessions);
+  }
+  private sendSessions(): void {
+    const sessions = this.getSessions();
+    this.postMessage({ type: 'sessions', sessions });
+  }
+  private saveSession(name: string, deviceId: string, filter: LogFilter): void {
+    if (!name || !deviceId) {
+      return;
+    }
+    const sessions = this.getSessions();
+    const existing = sessions.findIndex(s => s.name === name);
+    const session = { name, deviceId, filter };
+    if (existing >= 0) {
+      sessions[existing] = session;
+    } else {
+      sessions.push(session);
+    }
+    this.updateSessions(sessions);
+    this.sendSessions();
+  }
+  private runSession(name: string): void {
+    const sessions = this.getSessions();
+    const session = sessions.find(s => s.name === name);
+    if (!session) {
+      return;
+    }
+    this.postMessage({ type: 'sessionApplied', session });
+    this.startStream(session.deviceId);
   }
   private async sendDeviceList(): Promise<void> {
     try {
@@ -257,6 +355,20 @@ export class LogcatPanel {
     </select>
     <input type="text" id="tagFilter" placeholder="Filter by tag...">
     <input type="text" id="searchFilter" placeholder="Search...">
+    <select id="presetSelect">
+      <option value="">Presets</option>
+    </select>
+    <input type="text" id="presetName" placeholder="Preset name">
+    <button id="savePresetBtn">Save</button>
+    <button id="deletePresetBtn">Delete</button>
+    <select id="sessionSelect">
+      <option value="">Sessions</option>
+    </select>
+    <input type="text" id="sessionName" placeholder="Session name">
+    <button id="saveSessionBtn">Save Session</button>
+    <button id="runSessionBtn">Run Session</button>
+    <button id="errorsBtn">Errors</button>
+    <button id="warningsBtn">Warnings+</button>
     <span id="status" class="status">Stopped</span>
   </div>
     <div class="log-container" id="logContainer">
@@ -271,11 +383,23 @@ export class LogcatPanel {
     const levelSelect = document.getElementById('levelSelect');
     const tagFilter = document.getElementById('tagFilter');
     const searchFilter = document.getElementById('searchFilter');
+    const presetSelect = document.getElementById('presetSelect');
+    const presetName = document.getElementById('presetName');
+    const savePresetBtn = document.getElementById('savePresetBtn');
+    const deletePresetBtn = document.getElementById('deletePresetBtn');
+    const sessionSelect = document.getElementById('sessionSelect');
+    const sessionName = document.getElementById('sessionName');
+    const saveSessionBtn = document.getElementById('saveSessionBtn');
+    const runSessionBtn = document.getElementById('runSessionBtn');
+    const errorsBtn = document.getElementById('errorsBtn');
+    const warningsBtn = document.getElementById('warningsBtn');
     const statusEl = document.getElementById('status');
     const logContainer = document.getElementById('logContainer');
     let isRunning = false;
     let autoScroll = true;
     vscode.postMessage({ type: 'getDevices' });
+    vscode.postMessage({ type: 'getPresets' });
+    vscode.postMessage({ type: 'getSessions' });
     startBtn.addEventListener('click', () => {
       const deviceId = deviceSelect.value;
       if (deviceId) {
@@ -301,6 +425,58 @@ export class LogcatPanel {
       if (line) {
         vscode.postMessage({ type: 'copyLine', text: line.dataset.raw });
       }
+    });
+    presetSelect.addEventListener('change', () => {
+      const name = presetSelect.value;
+      if (name) {
+        vscode.postMessage({ type: 'applyPreset', name });
+      }
+    });
+    savePresetBtn.addEventListener('click', () => {
+      const name = presetName.value.trim();
+      if (!name) { return; }
+      vscode.postMessage({
+        type: 'savePreset',
+        name,
+        filter: {
+          minLevel: levelSelect.value,
+          tag: tagFilter.value || undefined,
+          search: searchFilter.value || undefined,
+        }
+      });
+    });
+    deletePresetBtn.addEventListener('click', () => {
+      const name = presetSelect.value;
+      if (!name) { return; }
+      vscode.postMessage({ type: 'deletePreset', name });
+    });
+    saveSessionBtn.addEventListener('click', () => {
+      const name = sessionName.value.trim();
+      const deviceId = deviceSelect.value;
+      if (!name || !deviceId) { return; }
+      vscode.postMessage({
+        type: 'saveSession',
+        name,
+        deviceId,
+        filter: {
+          minLevel: levelSelect.value,
+          tag: tagFilter.value || undefined,
+          search: searchFilter.value || undefined,
+        }
+      });
+    });
+    runSessionBtn.addEventListener('click', () => {
+      const name = sessionSelect.value;
+      if (!name) { return; }
+      vscode.postMessage({ type: 'runSession', name });
+    });
+    errorsBtn.addEventListener('click', () => {
+      levelSelect.value = 'E';
+      sendFilter();
+    });
+    warningsBtn.addEventListener('click', () => {
+      levelSelect.value = 'W';
+      sendFilter();
     });
     function sendFilter() {
       vscode.postMessage({
@@ -352,6 +528,41 @@ export class LogcatPanel {
           break;
         case 'error':
           console.error('Logcat error:', message.message);
+          break;
+        case 'presets':
+          presetSelect.innerHTML = '<option value=\"\">Presets</option>';
+          message.presets.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            presetSelect.appendChild(opt);
+          });
+          break;
+        case 'sessions':
+          sessionSelect.innerHTML = '<option value=\"\">Sessions</option>';
+          message.sessions.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.name;
+            opt.textContent = s.name;
+            sessionSelect.appendChild(opt);
+          });
+          break;
+        case 'sessionApplied':
+          if (message.session) {
+            deviceSelect.value = message.session.deviceId;
+            levelSelect.value = message.session.filter.minLevel || 'V';
+            tagFilter.value = message.session.filter.tag || '';
+            searchFilter.value = message.session.filter.search || '';
+            sendFilter();
+          }
+          break;
+        case 'presetApplied':
+          if (message.filter) {
+            levelSelect.value = message.filter.minLevel || 'V';
+            tagFilter.value = message.filter.tag || '';
+            searchFilter.value = message.filter.search || '';
+            sendFilter();
+          }
           break;
       }
     });

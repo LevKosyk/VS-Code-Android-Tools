@@ -161,3 +161,11 @@ export function isSdkAvailable(): boolean {
     return false;
   }
 }
+export function isBuildToolsInstalled(version: string): boolean {
+  try {
+    const sdk = detectSdk();
+    return fs.existsSync(path.join(sdk.root, 'build-tools', version));
+  } catch {
+    return false;
+  }
+}

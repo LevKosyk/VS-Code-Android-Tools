@@ -129,7 +129,7 @@ export class AndroidDebugSession {
     const processes = await listDebuggableProcesses(deviceId);
     if (processes.length === 0) {
       vscode.window.showErrorMessage(
-        'No debuggable processes found. Make sure your app is running and has debuggable=true.'
+        'No debuggable processes found. Run a Debug build (installDebug) and ensure debuggable=true.'
       );
       return undefined;
     }
@@ -180,6 +180,57 @@ export class AndroidDebugSession {
       this._port = localPort;
       this._debugSessionName = `Android JDWP: ${process.packageName}`;
       await javaDebug.activate();
+      const started = await vscode.debug.startDebugging(
+        undefined,
+        {
+          type: 'java',
+          name: this._debugSessionName,
+          request: 'attach',
+          hostName: '127.0.0.1',
+          port: localPort,
+        }
+      );
+      if (!started) {
+        await removeJdwpForward(deviceId, localPort);
+        this.setState('disconnected');
+        vscode.window.showErrorMessage('Failed to start Java debug session.');
+        return false;
+      }
+      this.setState('attached');
+      vscode.window.showInformationMessage(
+        `Debugger attached to ${process.packageName} (PID: ${process.pid})`
+      );
+      return true;
+    } catch (error) {
+      this.setState('error');
+      vscode.window.showErrorMessage(
+        `Failed to attach debugger: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return false;
+    }
+  }
+  async attachTo(deviceId: string, process: DebuggableProcess): Promise<boolean> {
+    if (this.isAttached) {
+      vscode.window.showWarningMessage('Debugger already attached. Detach first.');
+      return false;
+    }
+    this.setState('connecting');
+    try {
+      const localPort = await findAvailablePort();
+      await forwardJdwpPort(deviceId, process.pid, localPort);
+      const connected = await verifyJdwpConnection(localPort);
+      if (!connected) {
+        await removeJdwpForward(deviceId, localPort);
+        throw new Error('Failed to establish JDWP connection');
+      }
+      this._deviceId = deviceId;
+      this._processInfo = process;
+      this._port = localPort;
+      this._debugSessionName = `Android JDWP: ${process.packageName}`;
+      const javaDebug = vscode.extensions.getExtension('vscjava.vscode-java-debug');
+      if (javaDebug) {
+        await javaDebug.activate();
+      }
       const started = await vscode.debug.startDebugging(
         undefined,
         {
