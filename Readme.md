@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo/logo.png" width="120" alt="Android Sidecar Logo" />
+  <img src="https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/logo/logo.png" width="120" alt="Android Sidecar Logo" />
 </div>
 
 # Android Tools for VS Code
@@ -11,9 +11,9 @@
 It is **not** a replacement for Android Studio.  
 It is a **sidecar** — focused on speed, simplicity, and daily developer needs.
 
-![File System](assets/gifs/file-system.gif)
+![File System](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/file-system.gif)
 
-![Phone Launch](assets/gifs/phone-launch.gif)
+![Phone Launch](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/phone-launch.gif)
 
 ---
 
