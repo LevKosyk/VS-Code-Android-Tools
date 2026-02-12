@@ -20,6 +20,7 @@ import {
   getResourceTemplate,
   confirmOverwrite,
 } from './androidQuickPicks';
+import { showError, showInfo, showWarning } from '../ui/notifications';
 interface CreationResult {
   success: boolean;
   path?: string;
@@ -76,12 +77,12 @@ export async function createResourceFlow(
 ): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const resPath = getResPath(workspaceFolder.uri.fsPath);
   if (!resPath) {
-    vscode.window.showErrorMessage(
+    showError(
       'Could not find Android res directory. Make sure this is an Android project.'
     );
     return;
@@ -123,9 +124,9 @@ export async function createResourceFlow(
     provider.refresh();
     const document = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(document);
-    vscode.window.showInformationMessage(`Created ${fileNameWithExt}`);
+    showInfo(`Created ${fileNameWithExt}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create resource: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -136,12 +137,12 @@ export async function createFolderFlow(
 ): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const resPath = getResPath(workspaceFolder.uri.fsPath);
   if (!resPath) {
-    vscode.window.showErrorMessage(
+    showError(
       'Could not find Android res directory. Make sure this is an Android project.'
     );
     return;
@@ -155,15 +156,15 @@ export async function createFolderFlow(
   }
   const folderPath = path.join(resPath, folderName);
   if (fs.existsSync(folderPath)) {
-    vscode.window.showWarningMessage(`Folder already exists: ${folderName}`);
+    showWarning(`Folder already exists: ${folderName}`);
     return;
   }
   try {
     await ensureDir(folderPath);
     provider.refresh();
-    vscode.window.showInformationMessage(`Created folder: ${folderName}`);
+    showInfo(`Created folder: ${folderName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -174,7 +175,7 @@ export async function createAssetFlow(
 ): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   let assetsPath = getAssetsPath(workspaceFolder.uri.fsPath);
@@ -211,9 +212,9 @@ export async function createAssetFlow(
     provider.refresh();
     const document = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(document);
-    vscode.window.showInformationMessage(`Created asset: ${fileName}`);
+    showInfo(`Created asset: ${fileName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create asset: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -224,12 +225,12 @@ export async function createLocaleFlow(
 ): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const resPath = getResPath(workspaceFolder.uri.fsPath);
   if (!resPath) {
-    vscode.window.showErrorMessage(
+    showError(
       'Could not find Android res directory. Make sure this is an Android project.'
     );
     return;
@@ -257,9 +258,9 @@ export async function createLocaleFlow(
     provider.refresh();
     const document = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(document);
-    vscode.window.showInformationMessage(`Created ${folderName}/${valuesFile.fileName}`);
+    showInfo(`Created ${folderName}/${valuesFile.fileName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create locale: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -324,7 +325,7 @@ export async function createClassFlow(
      }
   }
   if (!targetUri) {
-    vscode.window.showErrorMessage('Select a package or folder to create the class in.');
+    showError('Select a package or folder to create the class in.');
     return;
   }
   const nameInput = await vscode.window.showInputBox({
@@ -369,15 +370,15 @@ ${isKotlin ? 'class' : 'public class'} ${nameInput} {
   try {
     const fs = require('fs');
     if (fs.existsSync(fileUri.fsPath)) {
-      vscode.window.showErrorMessage(`File ${fileName} already exists!`);
+      showError(`File ${fileName} already exists.`);
       return;
     }
     fs.writeFileSync(fileUri.fsPath, content);
     const doc = await vscode.workspace.openTextDocument(fileUri);
     await vscode.window.showTextDocument(doc);
     provider.refresh();
-    vscode.window.showInformationMessage(`Created ${fileName}`);
+    showInfo(`Created ${fileName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(`Failed to create class: ${error}`);
+    showError(`Failed to create class: ${error}`);
   }
 }

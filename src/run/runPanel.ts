@@ -7,10 +7,10 @@ export interface RunPanelHandlers {
   setVariant: (moduleName: string, variant: string) => Promise<void>;
   setFlavor: (moduleName: string, flavor: string) => Promise<void>;
   setBuildType: (moduleName: string, buildType: string) => Promise<void>;
-  build: (moduleName: string) => Promise<{ success: boolean; message: string }>;
-  install: (moduleName: string, deviceId: string) => Promise<{ success: boolean; message: string }>;
-  run: (moduleName: string, deviceId: string) => Promise<{ success: boolean; message: string }>;
-  clean: () => Promise<{ success: boolean; message: string }>;
+  build: (moduleName: string) => Promise<{ success: boolean; message: string; gradleError?: string }>;
+  install: (moduleName: string, deviceId: string) => Promise<{ success: boolean; message: string; gradleError?: string }>;
+  run: (moduleName: string, deviceId: string) => Promise<{ success: boolean; message: string; gradleError?: string }>;
+  clean: () => Promise<{ success: boolean; message: string; gradleError?: string }>;
 }
 
 export class RunPanel {
@@ -111,6 +111,10 @@ export class RunPanel {
         this.postMessage({ type: 'modules', modules });
         break;
       }
+      case 'openGradleOutput': {
+        await vscode.commands.executeCommand('android-toolkit.showGradleOutput');
+        break;
+      }
     }
   }
 
@@ -148,17 +152,17 @@ export class RunPanel {
     .col { display: flex; flex-direction: column; gap: 6px; }
     .card {
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px;
+      border-radius: 10px;
+      padding: 12px;
       margin-bottom: 12px;
     }
-    .title { font-weight: 600; margin-bottom: 6px; }
+    .title { font-weight: 600; margin-bottom: 8px; font-size: 13px; }
     select, button {
       font-family: inherit;
       font-size: 12px;
-      padding: 6px 10px;
+      padding: 7px 10px;
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: 8px;
       background: var(--input-bg);
       color: var(--input-fg);
     }
@@ -167,15 +171,70 @@ export class RunPanel {
       color: var(--btn-fg);
       border: none;
       cursor: pointer;
+      font-weight: 600;
     }
+    button:hover { opacity: 0.92; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     button.secondary {
       background: transparent;
       border: 1px solid var(--border);
       color: var(--fg);
     }
-    .status { color: var(--muted); margin-top: 6px; }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .grid button { width: 100%; }
+    .status {
+      color: var(--muted);
+      margin-top: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+    }
+    .status.loading {
+      color: #0369a1;
+      border-color: #7dd3fc;
+      background: #e0f2fe44;
+    }
+    .status.success {
+      color: #166534;
+      border-color: #86efac;
+      background: #dcfce744;
+    }
+    .status.error {
+      color: #b91c1c;
+      border-color: #fca5a5;
+      background: #fee2e244;
+      font-weight: 600;
+    }
+    .actions-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .actions-row button { width: 100%; }
+    .error-box {
+      margin-top: 8px;
+      border: 1px solid #fca5a5;
+      background: #fee2e244;
+      border-radius: 8px;
+      padding: 8px;
+      display: none;
+    }
+    .error-box.visible { display: block; }
+    .error-title { color: #b91c1c; font-weight: 700; margin-bottom: 6px; }
+    .error-text {
+      color: #7f1d1d;
+      white-space: pre-wrap;
+      font-family: var(--vscode-editor-font-family), monospace;
+      font-size: 12px;
+      max-height: 140px;
+      overflow: auto;
+      margin-bottom: 8px;
+    }
+    .error-actions { display: flex; justify-content: flex-end; }
+    @media (max-width: 900px) {
+      .actions-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
   </style>
 </head>
 <body>
@@ -207,13 +266,20 @@ export class RunPanel {
   </div>
   <div class="card">
     <div class="title">Actions</div>
-    <div class="grid">
-      <button id="buildBtn">Build Debug</button>
+    <div class="actions-row">
+      <button id="buildBtn">Build</button>
       <button id="installBtn">Install</button>
       <button id="runBtn">Run</button>
       <button id="cleanBtn" class="secondary">Clean</button>
     </div>
     <div id="status" class="status">Ready</div>
+    <div id="errorBox" class="error-box">
+      <div class="error-title">Gradle Error</div>
+      <div id="errorText" class="error-text"></div>
+      <div class="error-actions">
+        <button id="openGradleBtn" class="secondary">Open Gradle Output</button>
+      </div>
+    </div>
   </div>
   <script>
     const vscode = acquireVsCodeApi();
@@ -223,34 +289,83 @@ export class RunPanel {
     const flavorSelect = document.getElementById('flavorSelect');
     const buildTypeSelect = document.getElementById('buildTypeSelect');
     const statusEl = document.getElementById('status');
+    const errorBox = document.getElementById('errorBox');
+    const errorText = document.getElementById('errorText');
+    const openGradleBtn = document.getElementById('openGradleBtn');
+    const buildBtn = document.getElementById('buildBtn');
+    const installBtn = document.getElementById('installBtn');
+    const runBtn = document.getElementById('runBtn');
+    const cleanBtn = document.getElementById('cleanBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    let isBusy = false;
+
+    function updateActionButtons() {
+      const hasModule = !!moduleSelect.value;
+      const hasDevice = !!deviceSelect.value;
+      buildBtn.disabled = isBusy || !hasModule;
+      cleanBtn.disabled = isBusy;
+      installBtn.disabled = isBusy || !hasModule || !hasDevice;
+      runBtn.disabled = isBusy || !hasModule || !hasDevice;
+      refreshBtn.disabled = isBusy;
+    }
+    function setBusy(next) {
+      isBusy = next;
+      updateActionButtons();
+    }
+    function updateBuildButtonLabel() {
+      const variant = variantSelect.value || 'Variant';
+      buildBtn.textContent = 'Build ' + variant;
+    }
     function refresh() {
       vscode.postMessage({ type: 'refresh' });
     }
-    function setStatus(text) {
+    function setStatus(text, kind = 'neutral') {
       statusEl.textContent = text;
+      statusEl.className = 'status';
+      if (kind === 'loading' || kind === 'success' || kind === 'error') {
+        statusEl.classList.add(kind);
+      }
     }
-    document.getElementById('refreshBtn').addEventListener('click', refresh);
-    document.getElementById('buildBtn').addEventListener('click', () => {
+    function showGradleError(text) {
+      if (!text) {
+        errorBox.classList.remove('visible');
+        errorText.textContent = '';
+        return;
+      }
+      errorText.textContent = text;
+      errorBox.classList.add('visible');
+    }
+    refreshBtn.addEventListener('click', refresh);
+    buildBtn.addEventListener('click', () => {
+      setBusy(true);
       vscode.postMessage({ type: 'build', moduleName: moduleSelect.value });
-      setStatus('Building...');
+      setStatus('Building selected variant...', 'loading');
     });
-    document.getElementById('installBtn').addEventListener('click', () => {
+    installBtn.addEventListener('click', () => {
+      setBusy(true);
       vscode.postMessage({ type: 'install', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
-      setStatus('Installing...');
+      setStatus('Installing on selected device...', 'loading');
     });
-    document.getElementById('runBtn').addEventListener('click', () => {
+    runBtn.addEventListener('click', () => {
+      setBusy(true);
       vscode.postMessage({ type: 'run', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
-      setStatus('Starting app...');
+      setStatus('Starting app...', 'loading');
     });
-    document.getElementById('cleanBtn').addEventListener('click', () => {
+    cleanBtn.addEventListener('click', () => {
+      setBusy(true);
       vscode.postMessage({ type: 'clean' });
-      setStatus('Cleaning...');
+      setStatus('Cleaning project...', 'loading');
+    });
+    openGradleBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'openGradleOutput' });
     });
     moduleSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'getVariants', moduleName: moduleSelect.value });
+      updateActionButtons();
     });
     variantSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setVariant', moduleName: moduleSelect.value, variant: variantSelect.value });
+      updateBuildButtonLabel();
     });
     flavorSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setFlavor', moduleName: moduleSelect.value, flavor: flavorSelect.value });
@@ -260,28 +375,45 @@ export class RunPanel {
       vscode.postMessage({ type: 'setBuildType', moduleName: moduleSelect.value, buildType: buildTypeSelect.value });
       updateVariantFromSelections();
     });
+    deviceSelect.addEventListener('change', updateActionButtons);
     window.addEventListener('message', (event) => {
       const message = event.data;
       if (message.type === 'devices') {
         deviceSelect.innerHTML = '';
-        message.devices.forEach(d => {
+        if (!message.devices || message.devices.length === 0) {
           const opt = document.createElement('option');
-          opt.value = d.id;
-          opt.textContent = d.label;
+          opt.value = '';
+          opt.textContent = 'No online devices';
           deviceSelect.appendChild(opt);
-        });
+        } else {
+          message.devices.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.label;
+            deviceSelect.appendChild(opt);
+          });
+        }
+        updateActionButtons();
       }
       if (message.type === 'modules') {
         moduleSelect.innerHTML = '';
-        message.modules.forEach(m => {
+        if (!message.modules || message.modules.length === 0) {
           const opt = document.createElement('option');
-          opt.value = m;
-          opt.textContent = m;
+          opt.value = '';
+          opt.textContent = 'No modules';
           moduleSelect.appendChild(opt);
-        });
+        } else {
+          message.modules.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            moduleSelect.appendChild(opt);
+          });
+        }
         if (moduleSelect.value) {
           vscode.postMessage({ type: 'getVariants', moduleName: moduleSelect.value });
         }
+        updateActionButtons();
       }
       if (message.type === 'variants') {
         variantSelect.innerHTML = '';
@@ -314,10 +446,14 @@ export class RunPanel {
         if (message.selectedBuildType) {
           buildTypeSelect.value = message.selectedBuildType;
         }
+        updateBuildButtonLabel();
+        updateActionButtons();
       }
       if (message.type === 'result') {
+        setBusy(false);
         const prefix = message.success ? 'Done:' : 'Error:';
-        setStatus(prefix + ' ' + message.message);
+        setStatus(prefix + ' ' + message.message, message.success ? 'success' : 'error');
+        showGradleError(message.success ? '' : (message.gradleError || ''));
       }
     });
     function updateVariantFromSelections() {
@@ -327,9 +463,13 @@ export class RunPanel {
       const variant = flavor ? flavor + buildType : buildType;
       variantSelect.value = variant;
       vscode.postMessage({ type: 'setVariant', moduleName: moduleSelect.value, variant });
+      updateBuildButtonLabel();
     }
     vscode.postMessage({ type: 'getDevices' });
     vscode.postMessage({ type: 'getModules' });
+    updateBuildButtonLabel();
+    updateActionButtons();
+    showGradleError('');
   </script>
 </body>
 </html>`;

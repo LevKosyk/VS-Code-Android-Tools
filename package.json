@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "VS Code Android Tools",
   "description": "Fast, lightweight Android device and emulator management using CLI tools",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "levkosyk",
   "icon": "assets/logo/logo.png",
   "repository": {
@@ -294,6 +294,11 @@
         "command": "android-toolkit.openLayoutPreview",
         "title": "Android: Preview Layout",
         "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.openLayoutEditor",
+        "title": "Android: Open Layout Editor (Lite)",
+        "icon": "$(symbol-structure)"
       },
       {
         "command": "android-toolkit.openLayoutInspector",

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ProfilerService } from './profilerService';
 import { AdbService } from '../services/adbService';
 import { listRunningEmulators } from '../devices/deviceManager';
+import { showError, showWarning, withProgress } from '../ui/notifications';
 export class ProfilerPanel {
   public static currentPanel: ProfilerPanel | undefined;
   private static readonly viewType = 'profilerPanel';
@@ -10,6 +11,9 @@ export class ProfilerPanel {
   private disposables: vscode.Disposable[] = [];
   private selectedDeviceId: string | undefined;
   private selectedPackage: string | undefined;
+  private captureInFlight = false;
+  private lastCaptureAt = 0;
+  private readonly captureCooldownMs = 1200;
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
     this.extensionUri = extensionUri;
@@ -83,15 +87,18 @@ export class ProfilerPanel {
     }
   }
   private async captureAll() {
-    if (!this.selectedDeviceId || !this.selectedPackage) {
-      vscode.window.showWarningMessage('Select a device and package first');
+    if (!this.panel.visible || !this.selectedDeviceId || !this.selectedPackage) {
+      showWarning('Select a device and package first.');
       return;
     }
+    if (this.captureInFlight || Date.now() - this.lastCaptureAt < this.captureCooldownMs) {
+      return;
+    }
+    this.captureInFlight = true;
+    this.lastCaptureAt = Date.now();
     const profiler = ProfilerService.getInstance();
-    await vscode.window.withProgress({
-      location: vscode.ProgressLocation.Notification,
-      title: 'Capturing snapshot...'
-    }, async () => {
+    try {
+      await withProgress('Capturing snapshot...', async () => {
       const [cpu, memory, gfx] = await Promise.all([
         profiler.captureCpu(this.selectedDeviceId!, this.selectedPackage!),
         profiler.captureMemory(this.selectedDeviceId!, this.selectedPackage!),
@@ -106,10 +113,13 @@ export class ProfilerPanel {
           timestamp: Date.now()
         }
       });
-    });
+      });
+    } finally {
+      this.captureInFlight = false;
+    }
   }
   private async measureStartup() {
-    if (!this.selectedDeviceId || !this.selectedPackage) return;
+    if (!this.panel.visible || !this.selectedDeviceId || !this.selectedPackage) return;
     const activity = await vscode.window.showInputBox({ 
       prompt: 'Main Activity Name (e.g. .MainActivity)',
       value: '.MainActivity'
@@ -127,7 +137,7 @@ export class ProfilerPanel {
           data: result.data
         });
       } else {
-        vscode.window.showErrorMessage(result.message);
+        showError(result.message);
       }
     });
   }

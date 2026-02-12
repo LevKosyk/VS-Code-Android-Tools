@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { listGradleTasks } from '../gradle/gradleService';
 import { findApplicationModules } from '../core/androidProject';
+import { showError, showInfo, showWarning } from '../ui/notifications';
 
 export interface LaunchProfile {
   name: string;
@@ -58,7 +59,7 @@ export async function createLaunchProfileFlow(
   }
   const modules = findApplicationModules(workspaceRoot);
   if (modules.length === 0) {
-    vscode.window.showErrorMessage('No Android modules found.');
+    showError('No Android modules found.');
     return;
   }
   const moduleName = modules.length === 1
@@ -98,13 +99,13 @@ export async function createLaunchProfileFlow(
     task: taskPick && taskPick !== '(none)' ? taskPick : undefined,
   });
   writeLaunchProfiles(workspaceRoot, profiles);
-  vscode.window.showInformationMessage(`Launch profile created: ${name}`);
+  showInfo(`Launch profile created: ${name}`);
 }
 
 export async function deleteLaunchProfileFlow(workspaceRoot: string): Promise<void> {
   const profiles = readLaunchProfiles(workspaceRoot);
   if (profiles.length === 0) {
-    vscode.window.showInformationMessage('No launch profiles found.');
+    showWarning('No launch profiles found.');
     return;
   }
   const picked = await vscode.window.showQuickPick(
@@ -116,13 +117,13 @@ export async function deleteLaunchProfileFlow(workspaceRoot: string): Promise<vo
   }
   const next = profiles.filter(p => p.name !== picked.profile.name);
   writeLaunchProfiles(workspaceRoot, next);
-  vscode.window.showInformationMessage(`Launch profile deleted: ${picked.profile.name}`);
+  showInfo(`Launch profile deleted: ${picked.profile.name}`);
 }
 
 export async function selectLaunchProfile(workspaceRoot: string): Promise<LaunchProfile | undefined> {
   const profiles = readLaunchProfiles(workspaceRoot);
   if (profiles.length === 0) {
-    vscode.window.showInformationMessage('No launch profiles found.');
+    showWarning('No launch profiles found.');
     return undefined;
   }
   const picked = await vscode.window.showQuickPick(

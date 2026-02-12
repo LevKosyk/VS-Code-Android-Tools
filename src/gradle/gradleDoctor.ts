@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { detectSdk } from '../core/sdkDetector';
 import { execCommand } from '../core/cli';
+import { showError, showInfo, showWarning } from '../ui/notifications';
 
 function findSdkManager(sdkRoot: string): string | undefined {
   const cmdlineTools = path.join(sdkRoot, 'cmdline-tools');
@@ -42,7 +43,7 @@ export async function runGradleDoctor(workspaceRoot: string): Promise<void> {
     channel.appendLine(`SDK: ${sdkRoot}`);
   } catch {
     channel.appendLine('SDK not found.');
-    vscode.window.showErrorMessage('Android SDK not found. Set ANDROID_SDK_ROOT.');
+    showError('Android SDK not found. Set ANDROID_SDK_ROOT.');
     return;
   }
   const buildToolsDir = path.join(sdkRoot, 'build-tools');
@@ -67,7 +68,7 @@ export async function runGradleDoctor(workspaceRoot: string): Promise<void> {
   if (fix === 'Auto-fix SDK components') {
     const sdkmanager = findSdkManager(sdkRoot);
     if (!sdkmanager) {
-      vscode.window.showErrorMessage('sdkmanager not found in cmdline-tools.');
+      showError('sdkmanager not found in cmdline-tools.');
       return;
     }
     const packages = ['platform-tools'];
@@ -79,13 +80,13 @@ export async function runGradleDoctor(workspaceRoot: string): Promise<void> {
     }
     const res = await execCommand(sdkmanager, packages, { timeout: 600_000 });
     channel.appendLine(res.stdout || res.stderr);
-    vscode.window.showInformationMessage(res.exitCode === 0 ? 'SDK components fixed.' : 'SDK auto-fix failed. See output.');
+    res.exitCode === 0 ? showInfo('SDK components fixed.') : showError('SDK auto-fix failed. See output.');
     return;
   }
   const gradleProps = path.join(workspaceRoot, 'gradle.properties');
   if (fix === 'Fix daemon JVM args') {
     upsertGradleProperty(gradleProps, 'org.gradle.jvmargs', '-Xmx4g -Dfile.encoding=UTF-8');
-    vscode.window.showInformationMessage('Updated org.gradle.jvmargs in gradle.properties');
+    showInfo('Updated org.gradle.jvmargs in gradle.properties.');
     return;
   }
   if (fix === 'Toggle Gradle offline mode') {
@@ -93,13 +94,13 @@ export async function runGradleDoctor(workspaceRoot: string): Promise<void> {
     const current = content.match(/^org\.gradle\.offline=(true|false)$/m)?.[1] || 'false';
     const next = current === 'true' ? 'false' : 'true';
     upsertGradleProperty(gradleProps, 'org.gradle.offline', next);
-    vscode.window.showInformationMessage(`Gradle offline mode: ${next}`);
+    showInfo(`Gradle offline mode: ${next}.`);
     return;
   }
   if (fix === 'Clean Gradle cache') {
     const cacheDir = path.join(os.homedir(), '.gradle', 'caches');
     if (!fs.existsSync(cacheDir)) {
-      vscode.window.showWarningMessage('Gradle cache not found.');
+      showWarning('Gradle cache not found.');
       return;
     }
     const entries = fs.readdirSync(cacheDir);
@@ -111,6 +112,6 @@ export async function runGradleDoctor(workspaceRoot: string): Promise<void> {
         removed++;
       }
     }
-    vscode.window.showInformationMessage(`Gradle cache cleaned. Removed groups: ${removed}`);
+    showInfo(`Gradle cache cleaned. Removed groups: ${removed}.`);
   }
 }

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { showError } from '../ui/notifications';
 
 function getManifestPaths(workspaceRoot: string): string[] {
   const candidates = [
@@ -50,7 +51,7 @@ export async function insertManifestTemplate(): Promise<void> {
   }
   const doc = editor.document;
   if (!doc.fileName.endsWith('AndroidManifest.xml')) {
-    vscode.window.showErrorMessage('Open AndroidManifest.xml to insert a template.');
+    showError('Open AndroidManifest.xml to insert a template.');
     return;
   }
   const item = await vscode.window.showQuickPick(
@@ -82,7 +83,7 @@ export async function insertManifestTemplate(): Promise<void> {
   }
   const appClose = text.lastIndexOf('</application>');
   if (appClose === -1) {
-    vscode.window.showErrorMessage('Missing </application> tag.');
+    showError('Missing </application> tag.');
     return;
   }
   const position = doc.positionAt(appClose);
@@ -97,7 +98,7 @@ export async function openManifestEditor(): Promise<void> {
   }
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const candidates = [
@@ -106,7 +107,7 @@ export async function openManifestEditor(): Promise<void> {
   ];
   const manifest = candidates.find(p => fs.existsSync(p));
   if (!manifest) {
-    vscode.window.showErrorMessage('AndroidManifest.xml not found.');
+    showError('AndroidManifest.xml not found.');
     return;
   }
   const doc = await vscode.workspace.openTextDocument(manifest);
@@ -161,7 +162,7 @@ export async function addManifestEntryFlow(): Promise<void> {
   const entry = `\n        <${type.toLowerCase()} android:name="${name}" android:exported="${exported}">${intentFilter}        </${type.toLowerCase()}>\n`;
   const appClose = doc.getText().lastIndexOf('</application>');
   if (appClose === -1) {
-    vscode.window.showErrorMessage('Missing </application> tag.');
+    showError('Missing </application> tag.');
     return;
   }
   const position = doc.positionAt(appClose);

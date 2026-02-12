@@ -1,0 +1,10 @@
+{
+  "java.import.gradle.enabled": true,
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.import.generatesMetadataFilesAtProjectRoot": true,
+  "java.compile.nullAnalysis.mode": "automatic",
+  "kotlin.languageServer.enabled": true,
+  "files.associations": {
+    "*.gradle.kts": "kotlin"
+  }
+}

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { runGradleTaskWithResult } from './gradleService';
 import { showGradleOutput } from './gradleOutput';
+import { showError, showInfo } from '../ui/notifications';
 
 export async function runDependencyInsight(workspaceRoot: string, moduleName: string): Promise<void> {
   const dependency = await vscode.window.showInputBox({
@@ -20,6 +21,6 @@ export async function runDependencyInsight(workspaceRoot: string, moduleName: st
   const result = await runGradleTaskWithResult(workspaceRoot, task, args);
   showGradleOutput(`${task} ${args.join(' ')}`, result, workspaceRoot);
   result.exitCode === 0
-    ? vscode.window.showInformationMessage('Dependency insight completed.')
-    : vscode.window.showErrorMessage('Dependency insight failed. See output.');
+    ? showInfo('Dependency insight completed.')
+    : showError('Dependency insight failed. See output.');
 }

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { listDevicesDetailed } from '../devices/deviceManager';
-import { findApplicationId, findApplicationModules, findLatestDebugApk } from '../core/androidProject';
+import { findApplicationId, findApplicationModules, findLatestApk } from '../core/androidProject';
 import { runGradleTaskWithResult } from '../gradle/gradleService';
 import { showGradleOutput } from '../gradle/gradleOutput';
 import { AdbService } from '../services/adbService';
@@ -119,7 +119,7 @@ export class MatrixDashboardPanel {
         this.postMessage({ type: 'status', text: 'Build failed. See Gradle output.' });
         return;
       }
-      const found = findLatestDebugApk(this.workspaceRoot, moduleName, variant);
+      const found = findLatestApk(this.workspaceRoot, moduleName, variant);
       if (!found) {
         this.postMessage({ type: 'status', text: 'APK not found after build.' });
         return;

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { listDevicesDetailed } from '../devices/deviceManager';
 import { AdbService } from '../services/adbService';
+import { showError, showInfo } from '../ui/notifications';
 
 export class QuickActionsPanel {
   public static currentPanel: QuickActionsPanel | undefined;
@@ -88,9 +89,9 @@ export class QuickActionsPanel {
         const deviceClipboard = await AdbService.getClipboard(this.selectedDeviceId);
         if (deviceClipboard !== null) {
           await vscode.env.clipboard.writeText(deviceClipboard);
-          vscode.window.showInformationMessage('Clipboard pulled from device.');
+          showInfo('Clipboard pulled from device.');
         } else {
-          vscode.window.showErrorMessage('Failed to read device clipboard.');
+          showError('Failed to read device clipboard.');
         }
         return;
     }

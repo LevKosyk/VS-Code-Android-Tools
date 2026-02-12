@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { AdbService, EmulatorService, EmulatorStateService, EmulatorInfo, DEFAULT_LOCATION_PRESETS, NetworkProfile } from '../services';
+import { showError, showInfo, showWarning, withProgress } from '../ui/notifications';
 interface WebviewMessage {
   type: string;
   deviceId?: string;
@@ -107,7 +108,7 @@ export class EmulatorControlPanel {
   private async handleMessage(message: WebviewMessage): Promise<void> {
     const deviceId = message.deviceId || this.selectedDeviceId;
     if (!deviceId && message.type !== 'refresh' && message.type !== 'selectDevice' && message.type !== 'installApk') {
-      vscode.window.showWarningMessage('No emulator selected');
+      showWarning('No emulator selected.');
       return;
     }
     try {
@@ -271,27 +272,24 @@ export class EmulatorControlPanel {
               await AdbService.setBatteryStatus(deviceId!, status);
             }
             this.refreshStatus();
-            vscode.window.showInformationMessage('Battery updated');
+            showInfo('Battery updated.');
           });
           break;
       }
     } catch (error) {
-      vscode.window.showErrorMessage(
+      showError(
         error instanceof Error ? error.message : 'Operation failed'
       );
     }
   }
   private async runWithProgress<T>(title: string, operation: () => Promise<T>): Promise<T> {
-    return vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title },
-      operation
-    );
+    return withProgress(title, () => operation());
   }
   private showResult(result: { success: boolean; message: string }): void {
     if (result.success) {
-      vscode.window.showInformationMessage(result.message);
+      showInfo(result.message);
     } else {
-      vscode.window.showErrorMessage(result.message);
+      showError(result.message);
     }
   }
   public dispose(): void {

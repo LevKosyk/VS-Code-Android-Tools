@@ -9,6 +9,7 @@ export interface LogcatStreamEvents {
   'cleared': () => void;
 }
 export class LogcatStream extends EventEmitter {
+  private static readonly MAX_ENTRIES = 5000;
   private process: ChildProcess | null = null;
   private buffer: string = '';
   private entryId: number = 0;
@@ -94,11 +95,11 @@ export class LogcatStream extends EventEmitter {
         continue;
       }
       const entry = parseLogLine(line, ++this.entryId);
-      if (entry) {
-        this._entries.push(entry);
-        if (this._entries.length > 10000) {
-          this._entries.shift();
-        }
+        if (entry) {
+          this._entries.push(entry);
+          if (this._entries.length > LogcatStream.MAX_ENTRIES) {
+            this._entries.shift();
+          }
         if (matchesFilter(entry, this._filter)) {
           this.emit('entry', entry);
         }

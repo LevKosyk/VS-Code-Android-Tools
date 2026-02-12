@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { listGradleTasks, GradleTaskInfo, runGradleTaskWithResult } from './gradleService';
 import { showGradleOutput } from './gradleOutput';
+import { showError, showInfo } from '../ui/notifications';
 
 type NodeType = 'group' | 'task';
 
@@ -61,12 +62,12 @@ export class GradleTasksProvider implements vscode.TreeDataProvider<GradleTaskIt
 export async function runGradleTaskCommand(task: GradleTaskInfo): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const result = await runGradleTaskWithResult(workspaceRoot, task.fullName);
   showGradleOutput(task.fullName, result, workspaceRoot);
   result.exitCode === 0
-    ? vscode.window.showInformationMessage(`Task completed: ${task.fullName}`)
-    : vscode.window.showErrorMessage(`Task failed: ${task.fullName}`);
+    ? showInfo(`Task completed: ${task.fullName}`)
+    : showError(`Task failed: ${task.fullName}`);
 }

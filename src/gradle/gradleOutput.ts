@@ -116,3 +116,8 @@ export function updateGradleDiagnostics(workspaceRoot: string, result: ExecResul
 export function clearGradleDiagnostics(): void {
   diagnostics?.clear();
 }
+
+export function revealGradleOutput(): void {
+  ensureChannels();
+  outputChannel?.show(true);
+}

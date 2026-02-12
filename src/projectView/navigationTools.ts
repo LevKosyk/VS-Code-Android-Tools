@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { showError, showWarning } from '../ui/notifications';
 
 interface NavDestination {
   id: string;
@@ -93,12 +94,12 @@ async function revealAt(file: string, line: number): Promise<void> {
 export async function jumpToNavigationDestination(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const items = allDestinations(workspaceRoot);
   if (items.length === 0) {
-    vscode.window.showWarningMessage('No navigation graph destinations found.');
+    showWarning('No navigation graph destinations found.');
     return;
   }
   const picked = await vscode.window.showQuickPick(
@@ -114,7 +115,7 @@ export async function jumpToNavigationDestination(): Promise<void> {
 export async function jumpToNavigationArgument(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const items = allDestinations(workspaceRoot);
@@ -125,7 +126,7 @@ export async function jumpToNavigationArgument(): Promise<void> {
     }
   }
   if (argItems.length === 0) {
-    vscode.window.showWarningMessage('No navigation arguments found.');
+    showWarning('No navigation arguments found.');
     return;
   }
   const picked = await vscode.window.showQuickPick(
@@ -153,13 +154,13 @@ export async function jumpToNavigationArgument(): Promise<void> {
 export async function previewNavigationGraphSvg(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const destinations = allDestinations(workspaceRoot);
   const actions = getNavigationFiles(workspaceRoot).flatMap(parseActions);
   if (destinations.length === 0) {
-    vscode.window.showWarningMessage('No navigation graph destinations found.');
+    showWarning('No navigation graph destinations found.');
     return;
   }
   const nodeW = 220;

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { showError } from '../ui/notifications';
 
 export function validateResources(workspaceRoot: string): string[] {
   const issues: string[] = [];
@@ -36,7 +37,7 @@ export async function insertValuesTemplate(): Promise<void> {
   }
   const doc = editor.document;
   if (!doc.fileName.endsWith('.xml')) {
-    vscode.window.showErrorMessage('Open a values XML file to insert a template.');
+    showError('Open a values XML file to insert a template.');
     return;
   }
   const item = await vscode.window.showQuickPick(
@@ -62,7 +63,7 @@ export async function insertValuesTemplate(): Promise<void> {
   const text = doc.getText();
   const close = text.lastIndexOf('</resources>');
   if (close === -1) {
-    vscode.window.showErrorMessage('Missing </resources> tag.');
+    showError('Missing </resources> tag.');
     return;
   }
   const position = doc.positionAt(close);

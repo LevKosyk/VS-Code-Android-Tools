@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execCommand } from '../core/cli';
+import { showError, showWarning } from '../ui/notifications';
 
 function validatePackageName(value: string): string | undefined {
   if (!value || value.trim().length === 0) {
@@ -63,7 +64,7 @@ export async function createAndroidProjectWizard(): Promise<void> {
   }
   const projectDir = path.join(parentDir, projectName);
   if (fs.existsSync(projectDir)) {
-    vscode.window.showErrorMessage('A folder with that project name already exists.');
+    showError('A folder with that project name already exists.');
     return;
   }
   const appName = await vscode.window.showInputBox({
@@ -282,7 +283,7 @@ android.nonTransitiveRClass=true
         timeout: 60_000,
       });
     } else {
-      vscode.window.showWarningMessage('Gradle not found. Project created without Gradle wrapper.');
+      showWarning('Gradle not found. Project created without Gradle wrapper.');
     }
     const open = await vscode.window.showInformationMessage(
       `Project "${projectName}" created. Open it now?`,
@@ -294,7 +295,7 @@ android.nonTransitiveRClass=true
       vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
     }
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create project: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }

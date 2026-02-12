@@ -11,6 +11,7 @@ import {
   DebugState 
 } from './types';
 import { listDevices } from '../devices/deviceManager';
+import { showError, showInfo, showWarning } from '../ui/notifications';
 export class AndroidDebugSession {
   private _state: DebugState = 'disconnected';
   private _deviceId: string | null = null;
@@ -109,7 +110,7 @@ export class AndroidDebugSession {
     const devices = await listDevices();
     const onlineDevices = devices.filter(d => d.status === 'online');
     if (onlineDevices.length === 0) {
-      vscode.window.showErrorMessage('No online Android devices found.');
+      showError('No online Android devices found.');
       return undefined;
     }
     if (onlineDevices.length === 1) {
@@ -128,7 +129,7 @@ export class AndroidDebugSession {
   async selectProcess(deviceId: string): Promise<DebuggableProcess | undefined> {
     const processes = await listDebuggableProcesses(deviceId);
     if (processes.length === 0) {
-      vscode.window.showErrorMessage(
+      showError(
         'No debuggable processes found. Run a Debug build (installDebug) and ensure debuggable=true.'
       );
       return undefined;
@@ -145,7 +146,7 @@ export class AndroidDebugSession {
   }
   async attach(): Promise<boolean> {
     if (this.isAttached) {
-      vscode.window.showWarningMessage('Debugger already attached. Detach first.');
+      showWarning('Debugger already attached. Detach first.');
       return false;
     }
     this.setState('connecting');
@@ -153,7 +154,7 @@ export class AndroidDebugSession {
       const javaDebug = vscode.extensions.getExtension('vscjava.vscode-java-debug');
       if (!javaDebug) {
         this.setState('disconnected');
-        vscode.window.showErrorMessage(
+        showError(
           'Java Debugger extension not found. Install "Debugger for Java" to use Android debugging.'
         );
         return false;
@@ -193,17 +194,17 @@ export class AndroidDebugSession {
       if (!started) {
         await removeJdwpForward(deviceId, localPort);
         this.setState('disconnected');
-        vscode.window.showErrorMessage('Failed to start Java debug session.');
+        showError('Failed to start Java debug session.');
         return false;
       }
       this.setState('attached');
-      vscode.window.showInformationMessage(
+      showInfo(
         `Debugger attached to ${process.packageName} (PID: ${process.pid})`
       );
       return true;
     } catch (error) {
       this.setState('error');
-      vscode.window.showErrorMessage(
+      showError(
         `Failed to attach debugger: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return false;
@@ -211,7 +212,7 @@ export class AndroidDebugSession {
   }
   async attachTo(deviceId: string, process: DebuggableProcess): Promise<boolean> {
     if (this.isAttached) {
-      vscode.window.showWarningMessage('Debugger already attached. Detach first.');
+      showWarning('Debugger already attached. Detach first.');
       return false;
     }
     this.setState('connecting');
@@ -244,17 +245,17 @@ export class AndroidDebugSession {
       if (!started) {
         await removeJdwpForward(deviceId, localPort);
         this.setState('disconnected');
-        vscode.window.showErrorMessage('Failed to start Java debug session.');
+        showError('Failed to start Java debug session.');
         return false;
       }
       this.setState('attached');
-      vscode.window.showInformationMessage(
+      showInfo(
         `Debugger attached to ${process.packageName} (PID: ${process.pid})`
       );
       return true;
     } catch (error) {
       this.setState('error');
-      vscode.window.showErrorMessage(
+      showError(
         `Failed to attach debugger: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return false;
@@ -267,21 +268,21 @@ export class AndroidDebugSession {
     const packageName = this._processInfo?.packageName;
     if (this._debugSession) {
       await vscode.debug.stopDebugging(this._debugSession);
-      vscode.window.showInformationMessage(`Debugger detached from ${packageName || 'app'}`);
+      showInfo(`Debugger detached from ${packageName || 'app'}.`);
       return;
     }
     await this.cleanupAfterDebug();
-    vscode.window.showInformationMessage(`Debugger detached from ${packageName || 'app'}`);
+    showInfo(`Debugger detached from ${packageName || 'app'}.`);
   }
   async toggleBreakpoint(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      vscode.window.showWarningMessage('No active editor');
+      showWarning('No active editor.');
       return;
     }
     const lang = editor.document.languageId;
     if (lang !== 'java' && lang !== 'kotlin') {
-      vscode.window.showWarningMessage('Breakpoints only supported in Java/Kotlin files');
+      showWarning('Breakpoints are only supported in Java/Kotlin files.');
       return;
     }
     await vscode.commands.executeCommand('editor.debug.action.toggleBreakpoint');

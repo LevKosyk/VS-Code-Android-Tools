@@ -20,6 +20,9 @@ function canShow(kind: 'warn' | 'error', message: string): boolean {
   lastShown.set(key, now);
   return true;
 }
+function shouldPopupError(): boolean {
+  return getNotificationMode() === 'normal';
+}
 
 function channel(): vscode.OutputChannel {
   if (!output) {
@@ -47,7 +50,7 @@ export function showWarning(message: string): void {
 }
 export function showError(message: string): void {
   logLine('ERROR', message);
-  if (canShow('error', message)) {
+  if (shouldPopupError() && canShow('error', message)) {
     vscode.window.showErrorMessage(message);
   } else {
     vscode.window.setStatusBarMessage(`Android Tools error: ${message}`, 8000);
@@ -56,7 +59,7 @@ export function showError(message: string): void {
 export function showToolkitError(error: AndroidToolsError): void {
   const fullMessage = error.toNotification();
   logLine('ERROR', fullMessage);
-  if (canShow('error', fullMessage)) {
+  if (shouldPopupError() && canShow('error', fullMessage)) {
     vscode.window.showErrorMessage(fullMessage);
   } else {
     vscode.window.setStatusBarMessage(`Android Tools error: ${fullMessage}`, 8000);
@@ -66,6 +69,12 @@ export async function showErrorWithDetails(
   message: string,
   details: string
 ): Promise<void> {
+  if (!shouldPopupError()) {
+    logLine('ERROR', `${message} | details available in output`);
+    vscode.window.setStatusBarMessage(`Android Tools error: ${message}`, 8000);
+    channel().appendLine(details);
+    return;
+  }
   const action = await vscode.window.showErrorMessage(
     message,
     'Show Details'

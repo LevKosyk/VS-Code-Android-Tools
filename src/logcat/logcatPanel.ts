@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { LogcatStream, logcatManager } from './logcatStream';
 import { LogEntry, LogFilter, LogLevel, LOG_LEVEL_NAMES, DEFAULT_FILTER } from './types';
 import { listDevices } from '../devices/deviceManager';
+import { showError, showInfo } from '../ui/notifications';
 export class LogcatPanel {
   public static currentPanel: LogcatPanel | undefined;
   private static readonly viewType = 'androidLogcat';
@@ -11,6 +12,10 @@ export class LogcatPanel {
   private stream: LogcatStream | null = null;
   private filter: LogFilter = { ...DEFAULT_FILTER };
   private disposables: vscode.Disposable[] = [];
+  private pendingEntries: object[] = [];
+  private flushTimer: NodeJS.Timeout | undefined;
+  private readonly flushIntervalMs = 120;
+  private readonly flushBatchSize = 250;
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
     this.panel = panel;
     this.extensionUri = extensionUri;
@@ -62,7 +67,7 @@ export class LogcatPanel {
         break;
       case 'copyLine':
         await vscode.env.clipboard.writeText(message.text as string);
-        vscode.window.showInformationMessage('Log line copied to clipboard');
+        showInfo('Log line copied to clipboard.');
         break;
       case 'getPresets':
         this.sendPresets();
@@ -182,20 +187,19 @@ export class LogcatPanel {
   }
   private async startStream(deviceId: string): Promise<void> {
     this.stopStream();
+    this.pendingEntries = [];
     this.stream = logcatManager.getStream(deviceId);
     this.stream.setFilter(this.filter);
     this.stream.on('entry', (entry: LogEntry) => {
-      this.postMessage({
-        type: 'entry',
-        entry: this.serializeEntry(entry),
-      });
+      this.pendingEntries.push(this.serializeEntry(entry));
+      this.scheduleEntryFlush();
     });
     this.stream.on('state', (state) => {
       this.postMessage({ type: 'state', state });
     });
     this.stream.on('error', (message) => {
       this.postMessage({ type: 'error', message });
-      vscode.window.showErrorMessage(`Logcat: ${message}`);
+      showError(`Logcat: ${message}`);
     });
     this.stream.on('cleared', () => {
       this.postMessage({ type: 'cleared' });
@@ -207,7 +211,35 @@ export class LogcatPanel {
       entries: existingEntries.map(e => this.serializeEntry(e)),
     });
   }
+  private scheduleEntryFlush(): void {
+    if (this.pendingEntries.length >= this.flushBatchSize) {
+      this.flushPendingEntries();
+      return;
+    }
+    if (this.flushTimer) {
+      return;
+    }
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined;
+      this.flushPendingEntries();
+    }, this.flushIntervalMs);
+  }
+  private flushPendingEntries(): void {
+    if (this.pendingEntries.length === 0) {
+      return;
+    }
+    const batch = this.pendingEntries.splice(0, this.flushBatchSize);
+    this.postMessage({ type: 'entriesBatch', entries: batch });
+    if (this.pendingEntries.length > 0) {
+      this.scheduleEntryFlush();
+    }
+  }
   private stopStream(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+    this.pendingEntries = [];
     if (this.stream) {
       this.stream.removeAllListeners();
       this.stream.stop();
@@ -395,6 +427,7 @@ export class LogcatPanel {
     const warningsBtn = document.getElementById('warningsBtn');
     const statusEl = document.getElementById('status');
     const logContainer = document.getElementById('logContainer');
+    const MAX_RENDERED_LINES = 5000;
     let isRunning = false;
     let autoScroll = true;
     vscode.postMessage({ type: 'getDevices' });
@@ -519,9 +552,12 @@ export class LogcatPanel {
         case 'entry':
           appendEntry(message.entry);
           break;
+        case 'entriesBatch':
+          appendEntriesBatch(message.entries || []);
+          break;
         case 'entries':
           logContainer.innerHTML = '';
-          message.entries.forEach(appendEntry);
+          appendEntriesBatch(message.entries || []);
           break;
         case 'cleared':
           logContainer.innerHTML = '';
@@ -575,9 +611,25 @@ export class LogcatPanel {
         '<span class="log-level level-' + entry.level + '">' + entry.level + '</span>' +
         '<span class="log-tag" title="' + escapeHtml(entry.tag) + '">' + escapeHtml(entry.tag) + '</span>' +
         '<span class="log-msg">' + escapeHtml(entry.message) + '</span>';
-      logContainer.appendChild(div);
+      return div;
+    }
+    function trimRenderedLines() {
+      while (logContainer.children.length > MAX_RENDERED_LINES) {
+        logContainer.removeChild(logContainer.firstChild);
+      }
+    }
+    function appendEntriesBatch(entries) {
+      if (!entries || entries.length === 0) {
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const entry of entries) {
+        frag.appendChild(appendEntry(entry));
+      }
+      logContainer.appendChild(frag);
+      trimRenderedLines();
       if (autoScroll) {
-        div.scrollIntoView({ behavior: 'auto' });
+        logContainer.scrollTop = logContainer.scrollHeight;
       }
     }
     function escapeHtml(text) {

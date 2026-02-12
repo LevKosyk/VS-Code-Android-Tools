@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { showError, showInfo, showWarning } from '../ui/notifications';
 
 interface ResourceItem {
   type: string;
@@ -30,17 +31,17 @@ function collectValuesResources(filePath: string): ResourceItem[] {
 export async function openResourceInspector(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const resRoot = getResRoot(workspaceRoot);
   if (!resRoot) {
-    vscode.window.showErrorMessage('res directory not found.');
+    showError('res directory not found.');
     return;
   }
   const valuesDir = path.join(resRoot, 'values');
   if (!fs.existsSync(valuesDir)) {
-    vscode.window.showErrorMessage('values directory not found.');
+    showError('values directory not found.');
     return;
   }
   const files = fs.readdirSync(valuesDir).filter(f => f.endsWith('.xml'));
@@ -49,7 +50,7 @@ export async function openResourceInspector(): Promise<void> {
     items.push(...collectValuesResources(path.join(valuesDir, file)));
   }
   if (items.length === 0) {
-    vscode.window.showInformationMessage('No resources found in values.');
+    showInfo('No resources found in values.');
     return;
   }
   const picked = await vscode.window.showQuickPick(
@@ -86,18 +87,18 @@ export async function openResourceByQuery(): Promise<void> {
   const normalized = query.replace(/^R\./, '').replace('.', '/').trim();
   const parts = normalized.split('/');
   if (parts.length !== 2) {
-    vscode.window.showErrorMessage('Invalid resource format.');
+    showError('Invalid resource format.');
     return;
   }
   const [type, name] = parts;
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const resRoot = getResRoot(workspaceRoot);
   if (!resRoot) {
-    vscode.window.showErrorMessage('res directory not found.');
+    showError('res directory not found.');
     return;
   }
   const valuesDir = path.join(resRoot, 'values');
@@ -121,5 +122,5 @@ export async function openResourceByQuery(): Promise<void> {
       return;
     }
   }
-  vscode.window.showWarningMessage('Resource not found.');
+  showWarning('Resource not found.');
 }

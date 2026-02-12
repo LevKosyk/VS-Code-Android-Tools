@@ -31,7 +31,9 @@ Android Project View
 - Create Kotlin or Java class
 - Create files and folders
 - Rename and delete items
-- Drag and drop to move files
+- Drag and drop to move files and folders between directories
+- Conflict-safe moves (auto-renames when target name already exists)
+- Move preview before drop with confirm/cancel
 
 Emulator Control
 - Rotation, screenshots
@@ -125,6 +127,23 @@ ADB Shell
 
 Layout Preview (Lite)
 - Static preview for layout XML
+- Layout Editor (Lite): drag-and-drop components, properties, constraint handles, snap-to-grid, alignment guides
+- Multi-select with Cmd/Ctrl-click, align/distribute actions, and delete selected
+- Undo/Redo support for layout edits
+- Expanded palette: TextView, Button, EditText, ImageView, CheckBox, Switch, ProgressBar
+- Constraint type selectors: `toStartOf` / `toEndOf` / `toTopOf` / `toBottomOf`
+- Component Tree panel for quick selection and multi-select
+- Properties grouped by categories: common, text, layout, visibility
+- Visual constraint arrows with different styles for each link type
+- Resize handles on selected component (corner resize)
+- Constraint diagnostics panel: missing constraints, overlap, off-screen + badges in Component Tree
+- Diagnostics auto-fix actions: per-issue `Fix`, `Focus`, and global `Auto-Fix All`
+- Safe Auto-Fix mode: preview fixes before apply, with `Apply Preview` / `Discard Preview`
+- Safe Auto-Fix diff preview: per-component before/after field changes before apply
+- Diagnostics undo: `Undo Last Fix` restores previous layout state for diagnostics actions
+- UX polish: disabled button states, cleaner empty/loading states, and reduced noisy notifications
+- Live write modes: `onType` (debounced auto-write) or `onSave` (manual Apply XML)
+- Live device preview loop (optional) with gfx hotspot hints
 
 Layout Inspector (Lite)
 - View tree with bounds
@@ -211,6 +230,7 @@ New Project Wizard
 | Android: Delete From Device | Delete device files |
 | Android: Open ADB Shell | Open shell terminal |
 | Android: Preview Layout | Show layout preview |
+| Android: Open Layout Editor (Lite) | Drag-drop layout editor with properties and XML sync |
 | Android: Layout Inspector | View bounds and overlay |
 | Android: Compose Preview (Lite) | List and open `@Preview` composables |
 | Android: Validate Manifest | Basic manifest checks |

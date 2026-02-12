@@ -115,7 +115,7 @@ export function findBuildToolsVersion(workspaceRoot: string, moduleName: string)
   return undefined;
 }
 
-export function findLatestDebugApk(workspaceRoot: string, moduleName: string, variant?: string): string | undefined {
+export function findLatestApk(workspaceRoot: string, moduleName: string, variant?: string): string | undefined {
   const apkRoot = path.join(workspaceRoot, moduleName, 'build', 'outputs', 'apk');
   if (!fs.existsSync(apkRoot)) {
     return undefined;
@@ -149,4 +149,9 @@ export function findLatestDebugApk(workspaceRoot: string, moduleName: string, va
   }
   candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
   return candidates[0];
+}
+
+// Backward-compatible alias; kept to avoid broad refactors.
+export function findLatestDebugApk(workspaceRoot: string, moduleName: string, variant?: string): string | undefined {
+  return findLatestApk(workspaceRoot, moduleName, variant);
 }

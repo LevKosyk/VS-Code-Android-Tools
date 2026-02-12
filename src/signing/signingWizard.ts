@@ -5,6 +5,7 @@ import { execCommand } from '../core/cli';
 import { runGradleTaskWithResult } from '../gradle/gradleService';
 import { showGradleOutput } from '../gradle/gradleOutput';
 import { findApplicationModules } from '../core/androidProject';
+import { showError, showInfo } from '../ui/notifications';
 
 function getAppGradlePath(workspaceRoot: string, moduleName: string): string | undefined {
   const gradle = path.join(workspaceRoot, moduleName, 'build.gradle');
@@ -83,12 +84,12 @@ function findBundletoolJar(workspaceRoot: string): string | undefined {
 export async function runSigningWizard(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const modules = findApplicationModules(workspaceRoot);
   if (modules.length === 0) {
-    vscode.window.showErrorMessage('No Android modules found.');
+    showError('No Android modules found.');
     return;
   }
   const moduleName = modules.length === 1
@@ -138,7 +139,7 @@ export async function runSigningWizard(): Promise<void> {
   ];
   const result = await execCommand('keytool', keytoolArgs, { timeout: 60_000 });
   if (result.exitCode !== 0) {
-    vscode.window.showErrorMessage(`Keytool failed: ${result.stderr || result.stdout}`);
+    showError(`Keytool failed: ${result.stderr || result.stdout}`);
     return;
   }
   const signingPropsPath = path.join(workspaceRoot, 'android-tools.signing.properties');
@@ -149,13 +150,13 @@ export async function runSigningWizard(): Promise<void> {
     `keyPassword=${keyPass}`,
   ].join('\n'));
   await ensureSigningConfig(workspaceRoot, moduleName);
-  vscode.window.showInformationMessage('Signing setup complete.');
+  showInfo('Signing setup complete.');
 }
 
 export async function buildSignedApk(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const modules = findApplicationModules(workspaceRoot);
@@ -169,14 +170,14 @@ export async function buildSignedApk(): Promise<void> {
   const result = await runGradleTaskWithResult(workspaceRoot, task);
   showGradleOutput(task, result, workspaceRoot);
   result.exitCode === 0
-    ? vscode.window.showInformationMessage('Signed APK build complete')
-    : vscode.window.showErrorMessage('Signed APK build failed');
+    ? showInfo('Signed APK build complete.')
+    : showError('Signed APK build failed.');
 }
 
 export async function buildSignedBundle(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const modules = findApplicationModules(workspaceRoot);
@@ -190,8 +191,8 @@ export async function buildSignedBundle(): Promise<void> {
   const result = await runGradleTaskWithResult(workspaceRoot, task);
   showGradleOutput(task, result, workspaceRoot);
   result.exitCode === 0
-    ? vscode.window.showInformationMessage('Signed AAB build complete')
-    : vscode.window.showErrorMessage('Signed AAB build failed');
+    ? showInfo('Signed AAB build complete.')
+    : showError('Signed AAB build failed.');
 }
 
 export async function openPlaySigningHelper(): Promise<void> {
@@ -237,7 +238,7 @@ export async function bundletoolBuildApks(): Promise<void> {
     title: 'Select bundletool JAR',
   }))?.[0]?.fsPath;
   if (!jarPath) {
-    vscode.window.showErrorMessage('bundletool.jar not found. Set BUNDLETOOL_JAR or place jar in tools/Downloads.');
+    showError('bundletool.jar not found. Set BUNDLETOOL_JAR or place jar in tools/Downloads.');
     return;
   }
   const output = await vscode.window.showSaveDialog({
@@ -252,8 +253,8 @@ export async function bundletoolBuildApks(): Promise<void> {
   const args = ['-jar', jarPath, 'build-apks', '--bundle', aab[0].fsPath, '--output', output.fsPath, `--mode=${mode}`];
   const result = await execCommand('java', args, { timeout: 300_000 });
   result.exitCode === 0
-    ? vscode.window.showInformationMessage(`APKS created: ${output.fsPath}`)
-    : vscode.window.showErrorMessage(`bundletool failed: ${result.stderr || result.stdout}`);
+    ? showInfo(`APKS created: ${output.fsPath}`)
+    : showError(`bundletool failed: ${result.stderr || result.stdout}`);
 }
 
 export async function bundletoolInstallApks(): Promise<void> {
@@ -275,20 +276,20 @@ export async function bundletoolInstallApks(): Promise<void> {
     title: 'Select bundletool JAR',
   }))?.[0]?.fsPath;
   if (!jarPath) {
-    vscode.window.showErrorMessage('bundletool.jar not found. Set BUNDLETOOL_JAR or place jar in tools/Downloads.');
+    showError('bundletool.jar not found. Set BUNDLETOOL_JAR or place jar in tools/Downloads.');
     return;
   }
   const args = ['-jar', jarPath, 'install-apks', '--apks', apks[0].fsPath];
   const result = await execCommand('java', args, { timeout: 300_000 });
   result.exitCode === 0
-    ? vscode.window.showInformationMessage('APKS installed via bundletool')
-    : vscode.window.showErrorMessage(`bundletool install failed: ${result.stderr || result.stdout}`);
+    ? showInfo('APKS installed via bundletool.')
+    : showError(`bundletool install failed: ${result.stderr || result.stdout}`);
 }
 
 export async function bumpVersionCodeWizard(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const modules = findApplicationModules(workspaceRoot);
@@ -300,13 +301,13 @@ export async function bumpVersionCodeWizard(): Promise<void> {
   }
   const file = getAppGradlePath(workspaceRoot, moduleName);
   if (!file) {
-    vscode.window.showErrorMessage('build.gradle(.kts) not found.');
+    showError('build.gradle(.kts) not found.');
     return;
   }
   const content = fs.readFileSync(file, 'utf-8');
   const match = content.match(/versionCode\s*(=)?\s*(\d+)/);
   if (!match) {
-    vscode.window.showErrorMessage('versionCode not found in Gradle file.');
+    showError('versionCode not found in Gradle file.');
     return;
   }
   const current = parseInt(match[2], 10);
@@ -319,10 +320,10 @@ export async function bumpVersionCodeWizard(): Promise<void> {
   }
   const next = parseInt(nextRaw, 10);
   if (Number.isNaN(next) || next <= current) {
-    vscode.window.showErrorMessage('New versionCode must be a number greater than current.');
+    showError('New versionCode must be a number greater than current.');
     return;
   }
   const updated = content.replace(/versionCode\s*(=)?\s*\d+/, m => m.replace(/\d+/, String(next)));
   fs.writeFileSync(file, updated);
-  vscode.window.showInformationMessage(`versionCode bumped: ${current} -> ${next}`);
+  showInfo(`versionCode bumped: ${current} -> ${next}`);
 }

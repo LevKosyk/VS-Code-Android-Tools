@@ -60,7 +60,7 @@ import {
   pickDeviceProfile, 
   inputAvdName 
 } from './ui/quickPicks';
-import { findApplicationId, findApplicationModules, findBuildToolsVersion, findLatestDebugApk } from './core/androidProject';
+import { findApplicationId, findApplicationModules, findBuildToolsVersion, findLatestApk } from './core/androidProject';
 import { RunPanel } from './run/runPanel';
 import { ApkAnalyzerPanel } from './apk/apkAnalyzerPanel';
 import { ApkComparePanel } from './apk/apkComparePanel';
@@ -71,6 +71,7 @@ import { createLaunchProfileFlow, deleteLaunchProfileFlow, selectLaunchProfile }
 import { DeviceFileExplorerProvider } from './deviceExplorer/deviceFileExplorerProvider';
 import { deleteDevicePath, pullDeviceFile, pushDeviceFile } from './deviceExplorer/deviceFileService';
 import { LayoutPreviewPanel } from './layout/layoutPreviewPanel';
+import { LayoutEditorPanel } from './layout/layoutEditorPanel';
 import { insertManifestTemplate, validateManifest, openManifestEditor, addManifestEntryFlow } from './projectView/manifestTools';
 import { insertValuesTemplate, validateResources } from './projectView/resourceTools';
 import { openResourceInspector, openResourceByQuery } from './projectView/resourceInspector';
@@ -89,7 +90,7 @@ import {
   bumpVersionCodeWizard,
 } from './signing/signingWizard';
 import { checkProjectHealth } from './core/projectHealth';
-import { showGradleOutput } from './gradle/gradleOutput';
+import { showGradleOutput, revealGradleOutput } from './gradle/gradleOutput';
 import { QuickActionsPanel } from './deviceActions/quickActionsPanel';
 import { MappingViewerPanel } from './mapping/mappingViewerPanel';
 import { PerformanceMonitorPanel } from './monitor/performanceMonitorPanel';
@@ -101,6 +102,7 @@ import { ComposeLivePreviewPanel } from './compose/composeLivePreviewPanel';
 import { TestRunnerPanel } from './tests/testRunnerPanel';
 import { MatrixDashboardPanel } from './matrix/matrixDashboardPanel';
 let extensionContext: vscode.ExtensionContext | undefined;
+let lastGradleErrorSummary: string | undefined;
 interface RunConfiguration {
   id: string;
   name: string;
@@ -512,7 +514,24 @@ async function buildVariant(
   const task = `:${moduleName}:assemble${variant}`;
   const result = await runGradleTaskWithResult(workspaceRoot, task, gradleArgs, env);
   showGradleOutput(task, result, workspaceRoot);
+  if (result.exitCode === 0) {
+    lastGradleErrorSummary = undefined;
+  } else {
+    lastGradleErrorSummary = summarizeGradleError(result.stderr || result.stdout || '');
+  }
   return result.exitCode === 0;
+}
+function summarizeGradleError(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return 'Gradle task failed. See Android Gradle output for details.';
+  }
+  const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+  const whatIdx = lines.findIndex(l => /What went wrong/i.test(l));
+  if (whatIdx >= 0) {
+    return lines.slice(whatIdx, Math.min(lines.length, whatIdx + 8)).join('\n');
+  }
+  return lines.slice(0, 8).join('\n');
 }
 function extractBuildToolsVersionFromGradleError(output: string): string | undefined {
   const lines = output.split('\n');
@@ -547,7 +566,19 @@ async function installVariant(
   gradleArgs: string[] = [],
   env?: NodeJS.ProcessEnv
 ): Promise<boolean> {
-  const initialApk = findLatestDebugApk(workspaceRoot, moduleName, variant);
+  const installTask = `:${moduleName}:install${variant}`;
+  const availableTasks = await listGradleTasks(workspaceRoot);
+  const hasInstallTask = availableTasks.some(t => t.fullName === installTask);
+  if (hasInstallTask) {
+    const installResult = await runGradleTaskWithResult(workspaceRoot, installTask, gradleArgs, env);
+    showGradleOutput(installTask, installResult, workspaceRoot);
+    if (installResult.exitCode === 0) {
+      lastGradleErrorSummary = undefined;
+      return true;
+    }
+    lastGradleErrorSummary = summarizeGradleError(installResult.stderr || installResult.stdout || '');
+  }
+  const initialApk = findLatestApk(workspaceRoot, moduleName, variant);
   if (!initialApk) {
     const task = `:${moduleName}:assemble${variant}`;
     const buildResult = await runGradleTaskWithResult(workspaceRoot, task, gradleArgs, env);
@@ -560,14 +591,16 @@ async function installVariant(
       if (gradleMessage) {
         showError(`Gradle build failed: ${gradleMessage}`);
       }
+      lastGradleErrorSummary = summarizeGradleError(gradleMessage);
       return false;
     }
+    lastGradleErrorSummary = undefined;
   } else {
     if (!ensureBuildToolsInstalled(workspaceRoot, moduleName)) {
       return false;
     }
   }
-  const apkPath = findLatestDebugApk(workspaceRoot, moduleName, variant);
+  const apkPath = findLatestApk(workspaceRoot, moduleName, variant);
   if (!apkPath) {
     return false;
   }
@@ -662,7 +695,7 @@ async function gradleAssembleDebug(): Promise<void> {
   const ok = await withProgress(`Assembling ${variant}...`, async () => {
     return buildVariant(workspaceFolder.uri.fsPath, moduleName, variant);
   });
-  ok ? showInfo('AssembleDebug completed') : showError('AssembleDebug failed');
+  ok ? showInfo(`Assemble${variant} completed.`) : showError(`Assemble${variant} failed.`);
 }
 async function gradleInstallDebug(): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -680,7 +713,7 @@ async function gradleInstallDebug(): Promise<void> {
     return runGradleTaskWithResult(workspaceFolder.uri.fsPath, task);
   });
   showGradleOutput(task, result, workspaceFolder.uri.fsPath);
-  result.exitCode === 0 ? showInfo('InstallDebug completed') : showError('InstallDebug failed');
+  result.exitCode === 0 ? showInfo(`Install${variant} completed.`) : showError(`Install${variant} failed.`);
 }
 async function gradleClean(): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -890,13 +923,13 @@ async function installApkMatrix(): Promise<void> {
       return;
     }
     const variant = await getSelectedVariant(moduleName);
-    apkPath = findLatestDebugApk(workspaceFolder.uri.fsPath, moduleName, variant);
+    apkPath = findLatestApk(workspaceFolder.uri.fsPath, moduleName, variant);
     if (!apkPath) {
       const built = await buildVariant(workspaceFolder.uri.fsPath, moduleName, variant);
       if (!built) {
         return;
       }
-      apkPath = findLatestDebugApk(workspaceFolder.uri.fsPath, moduleName, variant);
+      apkPath = findLatestApk(workspaceFolder.uri.fsPath, moduleName, variant);
     }
   }
   if (!apkPath) {
@@ -977,7 +1010,7 @@ async function runDeviceMatrix(): Promise<void> {
       showError('Build failed.');
       return;
     }
-    const apkPath = findLatestDebugApk(workspaceFolder.uri.fsPath, moduleName, variant);
+    const apkPath = findLatestApk(workspaceFolder.uri.fsPath, moduleName, variant);
     if (!apkPath) {
       showError('APK not found after build.');
       return;
@@ -1055,6 +1088,22 @@ async function openLayoutPreview(): Promise<void> {
     showWarning('This file is not in res/layout.');
   }
   LayoutPreviewPanel.createOrShow(doc.getText(), path.basename(doc.fileName));
+}
+async function openLayoutEditor(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    showError('No active editor.');
+    return;
+  }
+  const doc = editor.document;
+  if (!doc.fileName.endsWith('.xml')) {
+    showError('Open a layout XML file.');
+    return;
+  }
+  if (!doc.fileName.includes(`${path.sep}res${path.sep}layout`)) {
+    showWarning('This file is not in res/layout.');
+  }
+  LayoutEditorPanel.createOrShow(doc);
 }
 async function validateManifestCommand(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1487,7 +1536,11 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           const variant = await getSelectedVariant(moduleName);
           const ok = await buildVariant(workspaceFolder.uri.fsPath, moduleName, variant);
-          return { success: ok, message: ok ? 'Build completed' : 'Build failed' };
+          return {
+            success: ok,
+            message: ok ? 'Build completed' : 'Build failed',
+            gradleError: ok ? undefined : lastGradleErrorSummary,
+          };
         },
         install: async (moduleName: string, deviceId: string) => {
           const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -1499,7 +1552,11 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           const variant = await getSelectedVariant(moduleName);
           const ok = await installVariant(workspaceFolder.uri.fsPath, moduleName, variant, deviceId);
-          return { success: ok, message: ok ? 'Install completed' : 'Install failed' };
+          return {
+            success: ok,
+            message: ok ? 'Install completed' : 'Install failed',
+            gradleError: ok ? undefined : lastGradleErrorSummary,
+          };
         },
         run: async (moduleName: string, deviceId: string) => {
           const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -1520,9 +1577,21 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           const result = await runGradleTaskWithResult(workspaceFolder.uri.fsPath, 'clean');
           showGradleOutput('clean', result, workspaceFolder.uri.fsPath);
-          return { success: result.exitCode === 0, message: result.exitCode === 0 ? 'Clean completed' : 'Clean failed' };
+          if (result.exitCode === 0) {
+            lastGradleErrorSummary = undefined;
+          } else {
+            lastGradleErrorSummary = summarizeGradleError(result.stderr || result.stdout || '');
+          }
+          return {
+            success: result.exitCode === 0,
+            message: result.exitCode === 0 ? 'Clean completed' : 'Clean failed',
+            gradleError: result.exitCode === 0 ? undefined : lastGradleErrorSummary,
+          };
         },
       });
+    }),
+    vscode.commands.registerCommand('android-toolkit.showGradleOutput', () => {
+      revealGradleOutput();
     }),
     vscode.commands.registerCommand('android-toolkit.runGradleTask', async (task) => {
       await runGradleTaskCommand(task);
@@ -1564,11 +1633,11 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!moduleName) {
           return;
         }
-        const apkPath = findLatestDebugApk(workspaceFolder.uri.fsPath, moduleName);
+        const apkPath = findLatestApk(workspaceFolder.uri.fsPath, moduleName);
         if (apkPath) {
           await ApkAnalyzerPanel.createOrShow(apkPath);
         } else {
-          showError('No APK found. Build a debug APK first.');
+          showError('No APK found. Build the selected variant first.');
         }
       }
     }),
@@ -1671,6 +1740,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('android-toolkit.openLayoutPreview', () => {
       openLayoutPreview();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openLayoutEditor', () => {
+      openLayoutEditor();
     }),
     vscode.commands.registerCommand('android-toolkit.openLayoutInspector', () => {
       LayoutInspectorPanel.createOrShow();
@@ -2023,7 +2095,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.window.showTextDocument(doc);
         await ensureLanguageMode(doc);
       } catch (error) {
-        vscode.window.showErrorMessage(`Failed to open file: ${error}`);
+        showError(`Failed to open file: ${error}`);
       }
     }),
     vscode.commands.registerCommand('android-toolkit.openProfiler', () => {

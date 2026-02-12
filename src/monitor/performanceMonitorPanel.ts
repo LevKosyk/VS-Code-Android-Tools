@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { listDevicesDetailed } from '../devices/deviceManager';
 import { AdbService } from '../services/adbService';
 import { ProfilerService } from '../profiler/profilerService';
+import { showError, showInfo, showWarning, withProgress } from '../ui/notifications';
 
 export class PerformanceMonitorPanel {
   public static currentPanel: PerformanceMonitorPanel | undefined;
@@ -10,6 +11,9 @@ export class PerformanceMonitorPanel {
   private disposables: vscode.Disposable[] = [];
   private selectedDeviceId: string | undefined;
   private selectedPackage: string | undefined;
+  private pollInFlight = false;
+  private lastPollAt = 0;
+  private pollCooldownMs = 1200;
 
   private constructor(panel: vscode.WebviewPanel) {
     this.panel = panel;
@@ -20,6 +24,11 @@ export class PerformanceMonitorPanel {
       this.disposables
     );
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    this.panel.onDidChangeViewState(() => {
+      if (!this.panel.visible) {
+        this.postMessage({ type: 'panelHidden' });
+      }
+    }, null, this.disposables);
     this.refreshDevices();
   }
 
@@ -90,24 +99,37 @@ export class PerformanceMonitorPanel {
   }
 
   private async poll(): Promise<void> {
-    if (!this.selectedDeviceId || !this.selectedPackage) {
+    if (!this.panel.visible || !this.selectedDeviceId || !this.selectedPackage) {
       return;
     }
+    if (this.pollInFlight) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastPollAt < this.pollCooldownMs) {
+      return;
+    }
+    this.pollInFlight = true;
+    this.lastPollAt = now;
     const profiler = ProfilerService.getInstance();
-    const [cpu, mem, gfx] = await Promise.all([
-      profiler.captureCpu(this.selectedDeviceId, this.selectedPackage),
-      profiler.captureMemory(this.selectedDeviceId, this.selectedPackage),
-      profiler.captureGraphics(this.selectedDeviceId, this.selectedPackage),
-    ]);
-    this.postMessage({
-      type: 'stats',
-      data: {
-        cpu: cpu.success ? cpu.data : null,
-        mem: mem.success ? mem.data : null,
-        gfx: gfx.success ? gfx.data : null,
-        timestamp: Date.now(),
-      }
-    });
+    try {
+      const [cpu, mem, gfx] = await Promise.all([
+        profiler.captureCpu(this.selectedDeviceId, this.selectedPackage),
+        profiler.captureMemory(this.selectedDeviceId, this.selectedPackage),
+        profiler.captureGraphics(this.selectedDeviceId, this.selectedPackage),
+      ]);
+      this.postMessage({
+        type: 'stats',
+        data: {
+          cpu: cpu.success ? cpu.data : null,
+          mem: mem.success ? mem.data : null,
+          gfx: gfx.success ? gfx.data : null,
+          timestamp: Date.now(),
+        }
+      });
+    } finally {
+      this.pollInFlight = false;
+    }
   }
 
   private postMessage(message: any): void {
@@ -115,20 +137,17 @@ export class PerformanceMonitorPanel {
   }
   private async recordTenSeconds(): Promise<void> {
     if (!this.selectedDeviceId || !this.selectedPackage) {
-      vscode.window.showWarningMessage('Select device and package first.');
+      showWarning('Select device and package first.');
       return;
     }
     const profiler = ProfilerService.getInstance();
-    const result = await vscode.window.withProgress({
-      location: vscode.ProgressLocation.Notification,
-      title: 'Recording 10s performance snapshot...'
-    }, async () => {
+    const result = await withProgress('Recording 10s performance snapshot...', async () => {
       return profiler.recordSeries(this.selectedDeviceId!, this.selectedPackage!, 10_000, 1_000);
     });
     if (result.success && result.data) {
-      vscode.window.showInformationMessage(`Saved trace: ${result.data}`);
+      showInfo(`Saved trace: ${result.data}`);
     } else {
-      vscode.window.showErrorMessage(result.message);
+      showError(result.message);
     }
   }
 
@@ -189,18 +208,29 @@ export class PerformanceMonitorPanel {
     const deviceSelect = document.getElementById('deviceSelect');
     const packageSelect = document.getElementById('packageSelect');
     const toggleBtn = document.getElementById('toggleBtn');
+    const recordBtn = document.getElementById('recordBtn');
     let timer = null;
+    function canPoll() {
+      return !!deviceSelect.value && !!packageSelect.value;
+    }
+    function updateButtons() {
+      toggleBtn.disabled = !canPoll() && !timer;
+      recordBtn.disabled = !canPoll();
+    }
 
     function start() {
       if (timer) return;
+      if (!canPoll()) return;
       toggleBtn.textContent = 'Stop';
       timer = setInterval(() => vscode.postMessage({ type: 'poll' }), 2000);
       vscode.postMessage({ type: 'poll' });
+      updateButtons();
     }
     function stop() {
       toggleBtn.textContent = 'Start';
       if (timer) clearInterval(timer);
       timer = null;
+      updateButtons();
     }
     toggleBtn.addEventListener('click', () => {
       if (timer) stop(); else start();
@@ -210,32 +240,61 @@ export class PerformanceMonitorPanel {
     });
     deviceSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'selectDevice', deviceId: deviceSelect.value });
+      updateButtons();
     });
     packageSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'selectPackage', package: packageSelect.value });
+      updateButtons();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stop();
+      }
     });
     window.addEventListener('message', event => {
       const msg = event.data;
       if (msg.type === 'devices') {
         deviceSelect.innerHTML = '';
-        for (const device of msg.data) {
+        if (!msg.data || msg.data.length === 0) {
           const opt = document.createElement('option');
-          opt.value = device.id;
-          opt.textContent = device.name;
+          opt.value = '';
+          opt.textContent = 'No online devices';
           deviceSelect.appendChild(opt);
+          stop();
+        } else {
+          for (const device of msg.data) {
+            const opt = document.createElement('option');
+            opt.value = device.id;
+            opt.textContent = device.name;
+            deviceSelect.appendChild(opt);
+          }
         }
+        updateButtons();
       }
       if (msg.type === 'packages') {
         packageSelect.innerHTML = '';
-        for (const pkg of msg.data) {
+        if (!msg.data || msg.data.length === 0) {
           const opt = document.createElement('option');
-          opt.value = pkg;
-          opt.textContent = pkg;
+          opt.value = '';
+          opt.textContent = 'No packages';
           packageSelect.appendChild(opt);
+          stop();
+        } else {
+          for (const pkg of msg.data) {
+            const opt = document.createElement('option');
+            opt.value = pkg;
+            opt.textContent = pkg;
+            packageSelect.appendChild(opt);
+          }
         }
+        updateButtons();
       }
       if (msg.type === 'selectPackage') {
         packageSelect.value = msg.data;
+        updateButtons();
+      }
+      if (msg.type === 'panelHidden') {
+        stop();
       }
       if (msg.type === 'stats') {
         const cpu = msg.data.cpu;
@@ -252,6 +311,7 @@ export class PerformanceMonitorPanel {
       }
     });
     vscode.postMessage({ type: 'refreshDevices' });
+    updateButtons();
   </script>
 </body>
 </html>`;

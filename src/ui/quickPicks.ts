@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AndroidDevice } from '../devices/types';
 import { Avd, SystemImage, DeviceProfile } from '../emulators/types';
+import { showWarning } from './notifications';
 interface QuickPickItemWithData<T> extends vscode.QuickPickItem {
   data: T;
 }
@@ -9,7 +10,7 @@ export async function pickDevice(
   options: { title?: string; placeholder?: string } = {}
 ): Promise<AndroidDevice | undefined> {
   if (devices.length === 0) {
-    vscode.window.showWarningMessage('No Android devices found.');
+    showWarning('No Android devices found.');
     return undefined;
   }
   const items: QuickPickItemWithData<AndroidDevice>[] = devices.map(device => ({
@@ -44,7 +45,7 @@ export async function pickAvd(
       : options.filter === 'stopped'
         ? 'No stopped emulators available. Run "Android: Create Emulator" to create one.'
         : 'No emulators found. Run "Android: Create Emulator" to create one.';
-    vscode.window.showWarningMessage(message);
+    showWarning(message);
     return undefined;
   }
   const items: QuickPickItemWithData<Avd>[] = filteredAvds.map(avd => ({
@@ -64,7 +65,7 @@ export async function pickSystemImage(
   options: { title?: string } = {}
 ): Promise<SystemImage | undefined> {
   if (images.length === 0) {
-    vscode.window.showWarningMessage(
+    showWarning(
       'No system images found. Install system images using Android SDK Manager.'
     );
     return undefined;

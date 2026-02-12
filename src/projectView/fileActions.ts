@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { AndroidProjectProvider } from './projectTreeProvider';
 import { ProjectTreeItem } from './projectTreeItem';
 import { CATEGORY_CONFIGS, CategoryId } from './types';
+import { showError, showInfo, showWarning } from '../ui/notifications';
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -49,7 +50,7 @@ export async function createFolderCommand(
 ): Promise<void> {
   const baseDir = getTargetDirectory(item);
   if (!baseDir) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const folderName = await vscode.window.showInputBox({
@@ -70,15 +71,15 @@ export async function createFolderCommand(
   }
   const folderPath = path.join(baseDir, folderName);
   if (fs.existsSync(folderPath)) {
-    vscode.window.showWarningMessage(`Folder already exists: ${folderName}`);
+    showWarning(`Folder already exists: ${folderName}`);
     return;
   }
   try {
     await fs.promises.mkdir(folderPath, { recursive: true });
     provider.refresh();
-    vscode.window.showInformationMessage(`Created folder: ${folderName}`);
+    showInfo(`Created folder: ${folderName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -90,7 +91,7 @@ export async function createFileCommand(
 ): Promise<void> {
   const baseDir = getTargetDirectory(item);
   if (!baseDir) {
-    vscode.window.showErrorMessage('No workspace folder open.');
+    showError('No workspace folder open.');
     return;
   }
   const fileName = await vscode.window.showInputBox({
@@ -111,7 +112,7 @@ export async function createFileCommand(
   }
   const filePath = path.join(baseDir, fileName);
   if (fs.existsSync(filePath)) {
-    vscode.window.showWarningMessage(`File already exists: ${fileName}`);
+    showWarning(`File already exists: ${fileName}`);
     return;
   }
   try {
@@ -120,9 +121,9 @@ export async function createFileCommand(
     provider.refresh();
     const document = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(document);
-    vscode.window.showInformationMessage(`Created file: ${fileName}`);
+    showInfo(`Created file: ${fileName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to create file: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -133,7 +134,7 @@ export async function renameItemCommand(
   provider: AndroidProjectProvider
 ): Promise<void> {
   if (!item?.data.resourceUri) {
-    vscode.window.showErrorMessage('Select a file or folder to rename.');
+    showError('Select a file or folder to rename.');
     return;
   }
   const currentPath = item.data.resourceUri.fsPath;
@@ -156,7 +157,7 @@ export async function renameItemCommand(
   }
   const newPath = path.join(path.dirname(currentPath), newName);
   if (fs.existsSync(newPath)) {
-    vscode.window.showErrorMessage('A file or folder with that name already exists.');
+    showError('A file or folder with that name already exists.');
     return;
   }
   try {
@@ -166,9 +167,9 @@ export async function renameItemCommand(
       { overwrite: false }
     );
     provider.refresh();
-    vscode.window.showInformationMessage(`Renamed to ${newName}`);
+    showInfo(`Renamed to ${newName}`);
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to rename: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
@@ -179,7 +180,7 @@ export async function deleteItemCommand(
   provider: AndroidProjectProvider
 ): Promise<void> {
   if (!item?.data.resourceUri) {
-    vscode.window.showErrorMessage('Select a file or folder to delete.');
+    showError('Select a file or folder to delete.');
     return;
   }
   const targetPath = item.data.resourceUri.fsPath;
@@ -197,9 +198,9 @@ export async function deleteItemCommand(
       useTrash: true,
     });
     provider.refresh();
-    vscode.window.showInformationMessage('Deleted');
+    showInfo('Deleted');
   } catch (error) {
-    vscode.window.showErrorMessage(
+    showError(
       `Failed to delete: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
