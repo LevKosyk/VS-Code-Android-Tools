@@ -19,20 +19,32 @@ export function getGradleCommand(workspaceRoot: string): string {
   return 'gradle';
 }
 
-export async function runGradleTask(workspaceRoot: string, task: string): Promise<boolean> {
+export async function runGradleTask(
+  workspaceRoot: string,
+  task: string,
+  extraArgs: string[] = [],
+  env?: NodeJS.ProcessEnv
+): Promise<boolean> {
   const gradleCmd = getGradleCommand(workspaceRoot);
-  const result = await execCommand(gradleCmd, [task], {
+  const result = await execCommand(gradleCmd, [task, ...extraArgs], {
     cwd: workspaceRoot,
     timeout: 300_000,
+    env,
   });
   return result.exitCode === 0;
 }
 
-export async function runGradleTaskWithResult(workspaceRoot: string, task: string) {
+export async function runGradleTaskWithResult(
+  workspaceRoot: string,
+  task: string,
+  extraArgs: string[] = [],
+  env?: NodeJS.ProcessEnv
+) {
   const gradleCmd = getGradleCommand(workspaceRoot);
-  return execCommand(gradleCmd, [task], {
+  return execCommand(gradleCmd, [task, ...extraArgs], {
     cwd: workspaceRoot,
     timeout: 300_000,
+    env,
   });
 }
 

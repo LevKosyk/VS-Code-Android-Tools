@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "VS Code Android Tools",
   "description": "Fast, lightweight Android device and emulator management using CLI tools",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "levkosyk",
   "icon": "assets/logo/logo.png",
   "repository": {
@@ -232,6 +232,18 @@
         "title": "Android: Delete Launch Profile"
       },
       {
+        "command": "android-toolkit.createRunConfiguration",
+        "title": "Android: Create Run Configuration"
+      },
+      {
+        "command": "android-toolkit.runRunConfiguration",
+        "title": "Android: Run Run Configuration"
+      },
+      {
+        "command": "android-toolkit.deleteRunConfiguration",
+        "title": "Android: Delete Run Configuration"
+      },
+      {
         "command": "android-toolkit.analyzeApk",
         "title": "Android: APK Analyzer",
         "icon": "$(graph)"
@@ -259,6 +271,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "android-toolkit.killRestartClearData",
+        "title": "Android: Kill+Restart with Clear Data",
+        "icon": "$(debug-restart)"
+      },
+      {
         "command": "android-toolkit.openDatabaseInspector",
         "title": "Android: Database Inspector",
         "icon": "$(database)"
@@ -282,6 +299,46 @@
         "command": "android-toolkit.openLayoutInspector",
         "title": "Android: Layout Inspector",
         "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.openQuickActions",
+        "title": "Android: Device Quick Actions",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "android-toolkit.openMappingViewer",
+        "title": "Android: Mapping Viewer (Proguard/R8)",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "android-toolkit.openPerformanceMonitor",
+        "title": "Android: Performance Monitor",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "android-toolkit.inspectBuildCache",
+        "title": "Android: Build Cache Inspector",
+        "icon": "$(database)"
+      },
+      {
+        "command": "android-toolkit.dependencyInsight",
+        "title": "Android: Dependency Insight",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "android-toolkit.openComposePreview",
+        "title": "Android: Compose Preview (Lite)",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.openComposeLivePreview",
+        "title": "Android: Compose Live Preview",
+        "icon": "$(device-camera-video)"
+      },
+      {
+        "command": "android-toolkit.runTests",
+        "title": "Android: Open Test Runner",
+        "icon": "$(beaker)"
       },
       {
         "command": "android-toolkit.emulator.saveSnapshot",
@@ -324,6 +381,18 @@
         "title": "Android: Go To Resource (R.)"
       },
       {
+        "command": "android-toolkit.jumpToNavDestination",
+        "title": "Android: Jump To Navigation Destination"
+      },
+      {
+        "command": "android-toolkit.jumpToNavArgument",
+        "title": "Android: Jump To Navigation Argument"
+      },
+      {
+        "command": "android-toolkit.previewNavGraphSvg",
+        "title": "Android: Preview Navigation Graph (SVG)"
+      },
+      {
         "command": "android-toolkit.selectDevice",
         "title": "Android: Select Device"
       },
@@ -363,28 +432,6 @@
       {
         "command": "android-toolkit.deviceExplorer.delete",
         "title": "Android: Delete From Device"
-      },
-      {
-        "command": "android-toolkit.runAppOnDevice",
-        "title": "Android: Run App on Device",
-        "icon": "$(play)"
-      },
-      {
-        "command": "android-toolkit.gradleAssembleDebug",
-        "title": "Android: Gradle Assemble Debug"
-      },
-      {
-        "command": "android-toolkit.gradleInstallDebug",
-        "title": "Android: Gradle Install Debug"
-      },
-      {
-        "command": "android-toolkit.gradleClean",
-        "title": "Android: Gradle Clean"
-      },
-      {
-        "command": "android-toolkit.openRunPanel",
-        "title": "Android: Open Run Panel",
-        "icon": "$(play)"
       },
       {
         "command": "android-toolkit.createFolder",
@@ -435,6 +482,42 @@
         "command": "android-toolkit.installApk",
         "title": "Android: Install APK",
         "icon": "$(package)"
+      },
+      {
+        "command": "android-toolkit.installApkMatrix",
+        "title": "Android: Install APK on Multiple Devices",
+        "icon": "$(package)"
+      },
+      {
+        "command": "android-toolkit.runDeviceMatrix",
+        "title": "Android: Device Matrix Run",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "android-toolkit.openMatrixDashboard",
+        "title": "Android: Matrix Dashboard",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "android-toolkit.gradleDoctor",
+        "title": "Android: Gradle Doctor",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "android-toolkit.playSigningHelper",
+        "title": "Android: Play App Signing Helper"
+      },
+      {
+        "command": "android-toolkit.bundletoolBuildApks",
+        "title": "Android: Bundletool Build APKS"
+      },
+      {
+        "command": "android-toolkit.bundletoolInstallApks",
+        "title": "Android: Bundletool Install APKS"
+      },
+      {
+        "command": "android-toolkit.bumpVersionCode",
+        "title": "Android: Bump Version Code Wizard"
       },
       {
         "command": "android-toolkit.uninstallApp",
@@ -604,6 +687,20 @@
           "group": "navigation@3"
         }
       ]
+    },
+    "configuration": {
+      "title": "Android Tools",
+      "properties": {
+        "androidToolkit.notifications.mode": {
+          "type": "string",
+          "enum": [
+            "quiet",
+            "normal"
+          ],
+          "default": "quiet",
+          "markdownDescription": "Controls Android Tools notification behavior. `quiet` minimizes pop-ups (status bar + output for info/warn). `normal` still reduces noise (info stays in status bar; warnings/errors are throttled)."
+        }
+      }
     }
   },
   "scripts": {

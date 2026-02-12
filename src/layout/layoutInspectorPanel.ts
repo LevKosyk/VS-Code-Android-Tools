@@ -134,28 +134,43 @@ export class LayoutInspectorPanel {
   <div class="wrap" id="wrap">
     <img id="shot" src="data:image/png;base64,${img}" />
   </div>
+  <div style="padding:8px;">
+    <input id="search" placeholder="Filter by id/class/text" style="width:100%; padding:4px;" />
+  </div>
   <div class="list" id="list"></div>
   <script>
     const nodes = ${payload};
     const wrap = document.getElementById('wrap');
     const list = document.getElementById('list');
     const img = document.getElementById('shot');
-    img.onload = () => {
+    const search = document.getElementById('search');
+    function render(filter) {
+      wrap.querySelectorAll('.overlay').forEach(el => el.remove());
+      list.innerHTML = '';
+      const f = filter ? filter.toLowerCase() : '';
       nodes.forEach(n => {
-        if (!n.bounds) return;
-        const div = document.createElement('div');
-        div.className = 'overlay';
-        div.style.left = n.bounds.l + 'px';
-        div.style.top = n.bounds.t + 'px';
-        div.style.width = (n.bounds.r - n.bounds.l) + 'px';
-        div.style.height = (n.bounds.b - n.bounds.t) + 'px';
-        wrap.appendChild(div);
+        const label = (n.resId || n.cls || 'View');
+        const textMatch = !f || label.toLowerCase().includes(f) || (n.text || '').toLowerCase().includes(f);
+        if (!textMatch) return;
+        if (n.bounds) {
+          const div = document.createElement('div');
+          div.className = 'overlay';
+          div.style.left = n.bounds.l + 'px';
+          div.style.top = n.bounds.t + 'px';
+          div.style.width = (n.bounds.r - n.bounds.l) + 'px';
+          div.style.height = (n.bounds.b - n.bounds.t) + 'px';
+          wrap.appendChild(div);
+        }
         const item = document.createElement('div');
         item.className = 'item';
-        item.textContent = (n.resId || n.cls || 'View') + ' [' + n.bounds.l + ',' + n.bounds.t + ',' + n.bounds.r + ',' + n.bounds.b + ']';
+        item.textContent = label + ' [' + n.bounds.l + ',' + n.bounds.t + ',' + n.bounds.r + ',' + n.bounds.b + ']';
         list.appendChild(item);
       });
+    }
+    img.onload = () => {
+      render('');
     };
+    search.addEventListener('input', () => render(search.value));
   </script>
 </body>
 </html>`;

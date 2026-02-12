@@ -7,6 +7,7 @@ export class AppInspectionPanel {
   private static readonly viewType = 'androidAppInspection';
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+  private lastDeviceId = '';
 
   private constructor(panel: vscode.WebviewPanel) {
     this.panel = panel;
@@ -49,6 +50,7 @@ export class AppInspectionPanel {
         if (!deviceId) {
           return;
         }
+        this.lastDeviceId = deviceId;
         const processes = await AdbService.listProcesses(deviceId);
         this.postMessage({ type: 'processes', processes });
         break;
@@ -61,6 +63,39 @@ export class AppInspectionPanel {
         }
         const details = await AdbService.getPackageDetails(deviceId, packageName);
         this.postMessage({ type: 'packageDetails', details });
+        break;
+      }
+      case 'getNetworkLogs': {
+        const deviceId = String(message.deviceId || this.lastDeviceId || '');
+        if (!deviceId) {
+          return;
+        }
+        const query = String(message.query || '').toLowerCase();
+        const logs = await AdbService.tailLogcat(deviceId, 220);
+        const lines = logs
+          .split('\n')
+          .filter(l => {
+            const s = l.toLowerCase();
+            if (!(s.includes('okhttp') || s.includes('retrofit') || s.includes('http'))) {
+              return false;
+            }
+            if (!query) {
+              return true;
+            }
+            return s.includes(query);
+          })
+          .slice(-150);
+        this.postMessage({ type: 'networkLogs', lines });
+        break;
+      }
+      case 'killRestartClearData': {
+        const deviceId = String(message.deviceId || '');
+        const packageName = String(message.packageName || '');
+        if (!deviceId || !packageName) {
+          return;
+        }
+        const result = await AdbService.killRestartWithClearData(deviceId, packageName);
+        this.postMessage({ type: 'clearRestartResult', result });
         break;
       }
     }
@@ -96,6 +131,8 @@ export class AppInspectionPanel {
     .item:last-child { border-bottom: none; }
     .muted { color: var(--muted); }
     .details { margin-top: 10px; }
+    .network { margin-top: 12px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+    .logs { max-height: 220px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; border: 1px solid var(--border); padding: 6px; margin-top: 8px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -105,11 +142,23 @@ export class AppInspectionPanel {
   </div>
   <div class="list" id="processList"></div>
   <div class="details" id="details"></div>
+  <div class="network">
+    <div class="row">
+      <input id="networkFilter" placeholder="Filter network logs (url/tag)" style="flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--input-fg);" />
+      <button id="toggleNetworkBtn">Start Network</button>
+      <button id="clearRestartBtn">Kill+Restart+Clear Data</button>
+    </div>
+    <div class="logs" id="networkLogs"></div>
+  </div>
   <script>
     const vscode = acquireVsCodeApi();
     const deviceSelect = document.getElementById('deviceSelect');
     const processList = document.getElementById('processList');
     const details = document.getElementById('details');
+    const networkLogs = document.getElementById('networkLogs');
+    const networkFilter = document.getElementById('networkFilter');
+    let networkTimer = null;
+    let selectedPackage = '';
     document.getElementById('refreshBtn').addEventListener('click', () => {
       vscode.postMessage({ type: 'getDevices' });
     });
@@ -121,8 +170,35 @@ export class AppInspectionPanel {
       if (!row) return;
       const pkg = row.dataset.pkg;
       if (pkg) {
+        selectedPackage = pkg;
         vscode.postMessage({ type: 'getPackageDetails', deviceId: deviceSelect.value, packageName: pkg });
       }
+    });
+    document.getElementById('toggleNetworkBtn').addEventListener('click', () => {
+      const btn = document.getElementById('toggleNetworkBtn');
+      if (networkTimer) {
+        clearInterval(networkTimer);
+        networkTimer = null;
+        btn.textContent = 'Start Network';
+        return;
+      }
+      btn.textContent = 'Stop Network';
+      networkTimer = setInterval(() => {
+        vscode.postMessage({
+          type: 'getNetworkLogs',
+          deviceId: deviceSelect.value,
+          query: networkFilter.value
+        });
+      }, 1500);
+      vscode.postMessage({ type: 'getNetworkLogs', deviceId: deviceSelect.value, query: networkFilter.value });
+    });
+    document.getElementById('clearRestartBtn').addEventListener('click', () => {
+      if (!selectedPackage) return;
+      vscode.postMessage({
+        type: 'killRestartClearData',
+        deviceId: deviceSelect.value,
+        packageName: selectedPackage
+      });
     });
     window.addEventListener('message', (event) => {
       const msg = event.data;
@@ -157,6 +233,15 @@ export class AppInspectionPanel {
           'First Install: ' + (d.firstInstallTime || '-') + '<br>' +
           'Last Update: ' + (d.lastUpdateTime || '-') +
           '</div>';
+      }
+      if (msg.type === 'networkLogs') {
+        networkLogs.textContent = (msg.lines || []).join('\\n');
+        networkLogs.scrollTop = networkLogs.scrollHeight;
+      }
+      if (msg.type === 'clearRestartResult') {
+        const r = msg.result || {};
+        const text = (r.message || (r.success ? 'Done' : 'Failed'));
+        details.innerHTML += '<div class=\"muted\" style=\"margin-top:6px;\">' + text + '</div>';
       }
     });
     vscode.postMessage({ type: 'getDevices' });

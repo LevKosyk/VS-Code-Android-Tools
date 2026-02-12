@@ -17,7 +17,6 @@ export class EmulatorStateService extends EventEmitter {
   }
   public startMonitoring(intervalMs: number = 2000): void {
     if (this.isMonitoring) return;
-    console.log('Starting emulator state monitoring...');
     this.isMonitoring = true;
     this.check(); 
     this.checkInterval = setInterval(() => this.check(), intervalMs);
@@ -28,7 +27,6 @@ export class EmulatorStateService extends EventEmitter {
       this.checkInterval = undefined;
     }
     this.isMonitoring = false;
-    console.log('Stopped emulator state monitoring.');
   }
   public async forceCheck(): Promise<void> {
     await this.check();
@@ -37,7 +35,6 @@ export class EmulatorStateService extends EventEmitter {
     try {
       const currentEmulators = await EmulatorService.listRunning();
       if (this.hasChanged(this.lastEmulators, currentEmulators)) {
-        console.log('Emulator state changed:', currentEmulators);
         this.lastEmulators = currentEmulators;
         this.emit('change', currentEmulators);
       }

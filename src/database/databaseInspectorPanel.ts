@@ -7,6 +7,7 @@ export class DatabaseInspectorPanel {
   private static readonly viewType = 'androidDatabaseInspector';
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
+  private snapshots = new Map<string, string>();
 
   private constructor(panel: vscode.WebviewPanel) {
     this.panel = panel;
@@ -107,7 +108,55 @@ export class DatabaseInspectorPanel {
         this.postMessage({ type: 'pullResult', success: ok });
         break;
       }
+      case 'saveDiffSnapshot': {
+        const deviceId = String(message.deviceId || '');
+        const packageName = String(message.packageName || '');
+        const dbName = String(message.dbName || '');
+        if (!deviceId || !packageName || !dbName) {
+          return;
+        }
+        const key = `${deviceId}|${packageName}|${dbName}`;
+        const content = await AdbService.pullDatabaseText(deviceId, packageName, dbName);
+        this.snapshots.set(key, content);
+        this.postMessage({ type: 'diffSnapshotSaved', ok: content.length > 0 });
+        break;
+      }
+      case 'runDiff': {
+        const deviceId = String(message.deviceId || '');
+        const packageName = String(message.packageName || '');
+        const dbName = String(message.dbName || '');
+        if (!deviceId || !packageName || !dbName) {
+          return;
+        }
+        const key = `${deviceId}|${packageName}|${dbName}`;
+        const oldText = this.snapshots.get(key) || '';
+        const newText = await AdbService.pullDatabaseText(deviceId, packageName, dbName);
+        const diff = this.diffText(oldText, newText);
+        this.postMessage({ type: 'diffResult', diff });
+        break;
+      }
     }
+  }
+  private diffText(before: string, after: string): { added: number; removed: number; preview: string[] } {
+    const a = new Set(before.split('\n').map(l => l.trim()).filter(Boolean));
+    const b = new Set(after.split('\n').map(l => l.trim()).filter(Boolean));
+    const added: string[] = [];
+    const removed: string[] = [];
+    for (const line of b) {
+      if (!a.has(line)) {
+        added.push(line);
+      }
+    }
+    for (const line of a) {
+      if (!b.has(line)) {
+        removed.push(line);
+      }
+    }
+    const preview = [
+      ...added.slice(0, 40).map(l => `+ ${l}`),
+      ...removed.slice(0, 40).map(l => `- ${l}`),
+    ];
+    return { added: added.length, removed: removed.length, preview };
   }
 
   private postMessage(message: object): void {
@@ -154,6 +203,8 @@ export class DatabaseInspectorPanel {
     <button id="runQueryBtn">Run</button>
     <button id="pullBtn">Pull DB</button>
     <button id="exportBtn">Export CSV</button>
+    <button id="saveSnapshotBtn">Save Snapshot</button>
+    <button id="runDiffBtn">Diff</button>
   </div>
   <div class="list" id="history"></div>
   <div class="list" id="dbList"></div>
@@ -170,6 +221,8 @@ export class DatabaseInspectorPanel {
     const queryInput = document.getElementById('queryInput');
     const queryResult = document.getElementById('queryResult');
     const status = document.getElementById('status');
+    const saveSnapshotBtn = document.getElementById('saveSnapshotBtn');
+    const runDiffBtn = document.getElementById('runDiffBtn');
     let lastQueryText = '';
     let lastQueryResult = '';
     const historyKey = 'android-tools.dbQueryHistory';
@@ -211,6 +264,28 @@ export class DatabaseInspectorPanel {
       if (!db) return;
       vscode.postMessage({ type: 'pullDatabase', deviceId: deviceSelect.value, packageName: packageSelect.value, dbName: db });
       setStatus('Pulling ' + db + '...');
+    });
+    saveSnapshotBtn.addEventListener('click', () => {
+      const db = dbSelect.value;
+      if (!db) return;
+      vscode.postMessage({
+        type: 'saveDiffSnapshot',
+        deviceId: deviceSelect.value,
+        packageName: packageSelect.value,
+        dbName: db
+      });
+      setStatus('Saving snapshot...');
+    });
+    runDiffBtn.addEventListener('click', () => {
+      const db = dbSelect.value;
+      if (!db) return;
+      vscode.postMessage({
+        type: 'runDiff',
+        deviceId: deviceSelect.value,
+        packageName: packageSelect.value,
+        dbName: db
+      });
+      setStatus('Calculating diff...');
     });
     dbList.addEventListener('click', (e) => {
       const row = e.target.closest('.item');
@@ -296,6 +371,14 @@ export class DatabaseInspectorPanel {
       }
       if (msg.type === 'pullResult') {
         setStatus(msg.success ? 'Pull completed' : 'Pull failed');
+      }
+      if (msg.type === 'diffSnapshotSaved') {
+        setStatus(msg.ok ? 'Snapshot saved' : 'Snapshot failed');
+      }
+      if (msg.type === 'diffResult') {
+        const d = msg.diff || { added: 0, removed: 0, preview: [] };
+        queryResult.textContent = 'Added: ' + d.added + '\\nRemoved: ' + d.removed + '\\n\\n' + (d.preview || []).join('\\n');
+        setStatus('Diff completed');
       }
     });
     vscode.postMessage({ type: 'getDevices' });

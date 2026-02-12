@@ -157,10 +157,116 @@ class AdbServiceClass {
     }
     return { success: true, message: `${packageName} started` };
   }
+  async startActivity(deviceId: string, packageName: string, activity: string, extras: Array<{ key: string; value: string }> = []): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const cmd = ['-s', deviceId, 'shell', 'am', 'start', '-n', `${packageName}/${activity}`];
+    for (const extra of extras) {
+      if (extra.key) {
+        cmd.push('--es', extra.key, extra.value ?? '');
+      }
+    }
+    const result = await execCommand(sdk.adb, cmd);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Failed to start activity: ${result.stderr || result.stdout}` };
+    }
+    return { success: true, message: `Started ${activity}` };
+  }
+  async startDeepLink(deviceId: string, uri: string, packageName?: string): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const cmd = ['-s', deviceId, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', uri];
+    if (packageName) {
+      cmd.push('-p', packageName);
+    }
+    const result = await execCommand(sdk.adb, cmd);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Failed to open deep link: ${result.stderr || result.stdout}` };
+    }
+    return { success: true, message: `Opened ${uri}` };
+  }
   async restartApp(deviceId: string, packageName: string): Promise<ServiceResult> {
     await this.forceStopApp(deviceId, packageName);
     await new Promise(r => setTimeout(r, 500));
     return this.startApp(deviceId, packageName);
+  }
+  async clearAppData(deviceId: string, packageName: string): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'pm', 'clear', packageName
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Clear data failed: ${result.stderr || result.stdout}` };
+    }
+    return { success: true, message: `${packageName} data cleared` };
+  }
+  async killRestartWithClearData(deviceId: string, packageName: string): Promise<ServiceResult> {
+    await this.forceStopApp(deviceId, packageName);
+    const cleared = await this.clearAppData(deviceId, packageName);
+    if (!cleared.success) {
+      return cleared;
+    }
+    return this.startApp(deviceId, packageName);
+  }
+  async inputKeyevent(deviceId: string, keycode: string): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'input', 'keyevent', keycode
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Keyevent failed: ${result.stderr}` };
+    }
+    return { success: true, message: `Keyevent sent: ${keycode}` };
+  }
+  async inputTap(deviceId: string, x: number, y: number): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'input', 'tap', String(x), String(y)
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Tap failed: ${result.stderr}` };
+    }
+    return { success: true, message: `Tap at ${x}, ${y}` };
+  }
+  async inputSwipe(deviceId: string, x1: number, y1: number, x2: number, y2: number, duration = 300): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'input', 'swipe',
+      String(x1), String(y1), String(x2), String(y2), String(duration)
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Swipe failed: ${result.stderr}` };
+    }
+    return { success: true, message: 'Swipe completed' };
+  }
+  async inputText(deviceId: string, text: string): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const escaped = text.replace(/ /g, '%s').replace(/'/g, "\\'");
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'input', 'text', escaped
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Input text failed: ${result.stderr}` };
+    }
+    return { success: true, message: 'Text input sent' };
+  }
+  async setClipboard(deviceId: string, text: string): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'cmd', 'clipboard', 'set', text
+    ]);
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Clipboard set failed: ${result.stderr || result.stdout}` };
+    }
+    return { success: true, message: 'Clipboard updated' };
+  }
+  async getClipboard(deviceId: string): Promise<string | null> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'cmd', 'clipboard', 'get'
+    ]);
+    if (result.exitCode !== 0) {
+      return null;
+    }
+    return result.stdout;
   }
   async listPackages(deviceId: string, includeSystem = false): Promise<string[]> {
     const sdk = detectSdk();
@@ -274,6 +380,57 @@ class AdbServiceClass {
       '-s', deviceId, 'shell', 'run-as', packageName, 'sqlite3', `databases/${dbName}`, query
     ], { timeout: 120_000 });
     return result.exitCode === 0 ? result.stdout : result.stderr;
+  }
+  async pullDatabaseText(deviceId: string, packageName: string, dbName: string): Promise<string> {
+    const sdk = detectSdk();
+    const cmd = `.mode line\n.dump`;
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'run-as', packageName, 'sqlite3', `databases/${dbName}`, cmd
+    ], { timeout: 120_000 });
+    return result.exitCode === 0 ? result.stdout : '';
+  }
+  async tailLogcat(deviceId: string, maxLines = 200, filter = ''): Promise<string> {
+    const sdk = detectSdk();
+    const args = ['-s', deviceId, 'logcat', '-v', 'threadtime', '-t', String(maxLines)];
+    if (filter.trim()) {
+      args.push(filter.trim());
+    }
+    const result = await execCommand(sdk.adb, args, { timeout: 60_000 });
+    return result.exitCode === 0 ? result.stdout : result.stderr;
+  }
+  async captureScreenBase64(deviceId: string): Promise<string | null> {
+    const sdk = detectSdk();
+    const remotePath = `/sdcard/__android_tools_screen_${Date.now()}.png`;
+    const localPath = path.join(require('os').tmpdir(), `android-tools-screen-${Date.now()}.png`);
+    const shot = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'screencap', '-p', remotePath], { timeout: 60_000 });
+    if (shot.exitCode !== 0) {
+      return null;
+    }
+    const pulled = await execCommand(sdk.adb, ['-s', deviceId, 'pull', remotePath, localPath], { timeout: 60_000 });
+    await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'rm', '-f', remotePath]);
+    if (pulled.exitCode !== 0 || !fs.existsSync(localPath)) {
+      return null;
+    }
+    try {
+      return fs.readFileSync(localPath).toString('base64');
+    } catch {
+      return null;
+    } finally {
+      if (fs.existsSync(localPath)) {
+        fs.unlinkSync(localPath);
+      }
+    }
+  }
+  async runInstrumentation(deviceId: string, runner: string): Promise<ServiceResult<string>> {
+    const sdk = detectSdk();
+    const result = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'am', 'instrument', '-w', runner
+    ], { timeout: 600_000 });
+    const output = result.stdout || result.stderr;
+    if (result.exitCode !== 0 || output.includes('FAILURES')) {
+      return { success: false, message: output, data: output };
+    }
+    return { success: true, message: 'Instrumentation finished', data: output };
   }
   async startScreenRecording(deviceId: string): Promise<ServiceResult<RecordingSession>> {
     if (this.activeRecordings.has(deviceId)) {

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { listGradleTasks, GradleTaskInfo, runGradleTask } from './gradleService';
+import { listGradleTasks, GradleTaskInfo, runGradleTaskWithResult } from './gradleService';
+import { showGradleOutput } from './gradleOutput';
 
 type NodeType = 'group' | 'task';
 
@@ -63,8 +64,9 @@ export async function runGradleTaskCommand(task: GradleTaskInfo): Promise<void> 
     vscode.window.showErrorMessage('No workspace folder open.');
     return;
   }
-  const ok = await runGradleTask(workspaceRoot, task.fullName);
-  ok
+  const result = await runGradleTaskWithResult(workspaceRoot, task.fullName);
+  showGradleOutput(task.fullName, result, workspaceRoot);
+  result.exitCode === 0
     ? vscode.window.showInformationMessage(`Task completed: ${task.fullName}`)
     : vscode.window.showErrorMessage(`Task failed: ${task.fullName}`);
 }

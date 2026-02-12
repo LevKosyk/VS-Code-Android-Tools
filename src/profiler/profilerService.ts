@@ -1,6 +1,9 @@
 import { execCommand } from '../core/cli';
 import { detectSdk } from '../core/sdkDetector';
 import { CpuSnapshot, MemorySnapshot, GraphicsStats, StartupStats, ProfilerResult } from './types';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 export class ProfilerService {
   private static instance: ProfilerService;
   private constructor() {}
@@ -127,5 +130,26 @@ export class ProfilerService {
         waitTime: parseInt(waitTimeMatch ? waitTimeMatch[1] : '0', 10)
       }
     };
+  }
+  async recordSeries(deviceId: string, packageName: string, durationMs: number, intervalMs: number): Promise<ProfilerResult<string>> {
+    const samples: any[] = [];
+    const end = Date.now() + durationMs;
+    while (Date.now() < end) {
+      const [cpu, mem, gfx] = await Promise.all([
+        this.captureCpu(deviceId, packageName),
+        this.captureMemory(deviceId, packageName),
+        this.captureGraphics(deviceId, packageName),
+      ]);
+      samples.push({
+        ts: Date.now(),
+        cpu: cpu.success ? cpu.data : null,
+        mem: mem.success ? mem.data : null,
+        gfx: gfx.success ? gfx.data : null,
+      });
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+    const outPath = path.join(os.tmpdir(), `android-tools-profile-${Date.now()}.json`);
+    fs.writeFileSync(outPath, JSON.stringify(samples, null, 2), 'utf-8');
+    return { success: true, message: 'Recorded samples', data: outPath };
   }
 }

@@ -5,6 +5,10 @@ interface RequiredExtension {
   name: string;
   url: string;
 }
+const JAVA25_NOTICE_KEY = 'androidTools.langNotice.java25.lastShown';
+const MISSING_EXT_NOTICE_KEY = 'androidTools.langNotice.missingExt.lastShown';
+const NOTICE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+let contextStore: vscode.Memento | undefined;
 const REQUIRED_EXTENSIONS: Record<string, RequiredExtension> = {
   java: {
     id: 'vscjava.vscode-java-pack',
@@ -52,7 +56,10 @@ async function activateIfInstalled(extId: string): Promise<void> {
     }
   }
 }
-export async function checkLanguageExtensions(): Promise<void> {
+export async function checkLanguageExtensions(context?: vscode.ExtensionContext): Promise<void> {
+  if (context) {
+    contextStore = context.globalState;
+  }
   const missing: RequiredExtension[] = [];
   const javaExt = vscode.extensions.getExtension(REQUIRED_EXTENSIONS.java.id);
   if (!javaExt) {
@@ -64,26 +71,28 @@ export async function checkLanguageExtensions(): Promise<void> {
   } else {
     const javaMajor = await getJavaMajorVersion();
     if (javaMajor && javaMajor >= 25) {
-      const message =
-        'Kotlin language server does not support Java 25 yet. ' +
-        'Install JDK 21 and set JAVA_HOME to it, then restart VS Code.';
-      const action = 'Install JDK 21';
-      const selection = await vscode.window.showWarningMessage(message, action);
-      if (selection === action) {
-        vscode.env.openExternal(vscode.Uri.parse('https://adoptium.net/temurin/releases/?version=21'));
+      const now = Date.now();
+      const lastShown = contextStore?.get<number>(JAVA25_NOTICE_KEY) || 0;
+      if (now - lastShown > NOTICE_COOLDOWN_MS) {
+        vscode.window.setStatusBarMessage(
+          'Android Tools: Kotlin extension may fail on Java 25. Use JDK 21 if needed.',
+          8000
+        );
+        await contextStore?.update(JAVA25_NOTICE_KEY, now);
       }
     } else {
       await activateIfInstalled(REQUIRED_EXTENSIONS.kotlin.id);
     }
   }
   if (missing.length > 0) {
-    const message = `Missing language support extensions: ${missing.map(e => e.name).join(', ')}. IntelliSense may not work correctly.`;
-    const action = 'Install Missing Extensions';
-    const selection = await vscode.window.showWarningMessage(message, action);
-    if (selection === action) {
-      for (const ext of missing) {
-        vscode.env.openExternal(vscode.Uri.parse(ext.url));
-      }
+    const now = Date.now();
+    const lastShown = contextStore?.get<number>(MISSING_EXT_NOTICE_KEY) || 0;
+    if (now - lastShown > NOTICE_COOLDOWN_MS) {
+      vscode.window.setStatusBarMessage(
+        `Android Tools: Missing language extensions: ${missing.map(e => e.name).join(', ')}`,
+        8000
+      );
+      await contextStore?.update(MISSING_EXT_NOTICE_KEY, now);
     }
   }
 }

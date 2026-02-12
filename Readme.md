@@ -17,10 +17,6 @@ Android Sidecar is a lightweight VS Code extension that brings the most used And
 2. Run `Android: Start Emulator`.
 3. Run `Android: Run App on Emulator`.
 
-## Screenshots
-Project View, Emulator Control, Logcat Viewer:
-![File System](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/file-system.gif)
-![Phone Launch](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/phone-launch.gif)
 
 ## Key Features
 Fast Android Runner
@@ -43,6 +39,8 @@ Emulator Control
 - Network on and off
 - Battery simulation with level and charging
 - Screen recording
+- Quick actions: key events, taps, swipes, text input
+- Push/pull clipboard
 
 Logcat Viewer
 - Live stream, filter by tag, level, or search
@@ -55,6 +53,8 @@ Debugging
 
 Profiler (Lite)
 - CPU and memory snapshots
+- ADB performance monitor: CPU, memory, graphics polling
+- Record 10s performance series to JSON trace
 
 Run Panel
 - Select module, device, and build variant
@@ -72,12 +72,20 @@ Gradle Task Explorer
 - Browse tasks by group
 - One click run
 
+Gradle Build Output Panel
+- Dedicated Gradle output channel
+- Error parsing with file/line links
+
 Build Variants
 - Pick debug, release, and product flavors
 
 Launch Profiles
 - Save module, variant, device type, and optional task
 - Run profiles from the command palette
+
+Run Configurations
+- Per module and variant configs
+- Pre-run tasks, env vars, and Gradle arguments
 
 APK Analyzer (Lite)
 - Total APK size
@@ -87,14 +95,26 @@ APK Analyzer (Lite+)
 - Compare two APKs
 - Top classes and resources
 
+Mapping Viewer
+- Open mapping.txt
+- Search classes
+- Deobfuscate stacktraces
+
 App Inspection (Lite)
 - Running processes
 - Package version and install info
+- Live network log stream (OkHttp/HTTP via Logcat pattern)
+- Kill + Restart + Clear Data quick action
 
 Database Inspector (Lite)
 - List app databases
 - Pull database files for local inspection
  - Simple queries and CSV export
+- Snapshot and diff between database states
+
+APK Install Matrix
+- Install the same APK on multiple devices
+- Per-device report output
 
 Device File Explorer
 - Browse `/sdcard`
@@ -109,6 +129,30 @@ Layout Preview (Lite)
 Layout Inspector (Lite)
 - View tree with bounds
 - Screenshot overlay
+- Live filter by id/class/text
+
+Compose Tooling (Lite)
+- Static compose preview list from `@Preview`
+- Live preview via emulator screenshot
+- Parameter set input and recomposition hotspot hints (gfx framestats)
+
+Test Runner
+- Unit and instrumentation launch from panel
+- Tree view from JUnit XML reports
+- Re-run failed tests quickly
+- Device matrix run for instrumentation
+
+Gradle Doctor
+- Auto-fix helpers for SDK components and daemon JVM args
+- Offline mode toggle
+- Cache cleaner for common Gradle cache groups
+- Auto-detect sdkmanager from Android cmdline-tools
+
+Signing and Release
+- Play App Signing helper
+- Bundletool integration (`build-apks`, `install-apks`)
+- VersionCode bump wizard
+- Auto-detect `bundletool.jar` from project/home common locations
 
 Manifest and Resource Tools
 - Insert templates
@@ -116,6 +160,8 @@ Manifest and Resource Tools
 - Resource inspector (values)
  - Go to resource by R.string/R.color/R.dimen
  - Manifest editor for activity/service/permission
+- Navigation graph helpers (destination/argument jump + SVG preview)
+- Graph layout with action arrows in SVG preview
 
 New Project Wizard
 - App name, package, language
@@ -126,6 +172,8 @@ New Project Wizard
 | Command | Description |
 | --- | --- |
 | Android: List Devices | Show connected devices |
+| Refresh | Refresh current Android Tools view |
+| Open in Explorer | Reveal selected item in VS Code explorer |
 | Android: Start Emulator | Start an AVD |
 | Android: Stop Emulator | Stop an AVD |
 | Android: Create Emulator | Create a new AVD |
@@ -141,10 +189,19 @@ New Project Wizard
 | Android: Create Launch Profile | Save a launch profile |
 | Android: Run Launch Profile | Run a launch profile |
 | Android: Delete Launch Profile | Delete a launch profile |
+| Android: Rename | Rename selected file/folder in Android project view |
+| Android: Delete | Delete selected file/folder in Android project view |
+| Android: Create Run Configuration | Create a run configuration |
+| Android: Run Run Configuration | Run a saved configuration |
+| Android: Delete Run Configuration | Delete a configuration |
 | Android: APK Analyzer | Analyze APK size |
 | Android: Compare APKs | Compare two APKs |
 | Android: App Inspection | Inspect running apps |
+| Android: Kill+Restart with Clear Data | Reset and restart selected app |
 | Android: Database Inspector | Inspect app databases |
+| Android: Debug Panel | Open integrated debug panel |
+| Android: Build Cache Inspector | Show build cache stats and issues |
+| Android: Dependency Insight | Run Gradle dependency insight |
 | Android: Signing Wizard | Generate keystore and setup signing |
 | Android: Build Signed APK | Build release APK |
 | Android: Build Signed AAB | Build release bundle |
@@ -155,6 +212,7 @@ New Project Wizard
 | Android: Open ADB Shell | Open shell terminal |
 | Android: Preview Layout | Show layout preview |
 | Android: Layout Inspector | View bounds and overlay |
+| Android: Compose Preview (Lite) | List and open `@Preview` composables |
 | Android: Validate Manifest | Basic manifest checks |
 | Android: Insert Manifest Template | Insert manifest snippets |
 | Android: Add Manifest Entry | Add activity/service/permission |
@@ -163,11 +221,26 @@ New Project Wizard
 | Android: Insert Values Template | Insert values snippets |
 | Android: Resource Inspector | Search resources |
 | Android: Go To Resource (R.) | Jump to values resource |
+| Android: Jump To Navigation Destination | Jump to destination in navigation graph |
+| Android: Jump To Navigation Argument | Jump to argument in navigation graph |
+| Android: Preview Navigation Graph (SVG) | Render navigation graph overview |
+| Android: Device Quick Actions | Send keys, taps, swipes, text, clipboard |
+| Android: Mapping Viewer (Proguard/R8) | Open mapping.txt and deobfuscate stacktraces |
+| Android: Performance Monitor | Live CPU/memory/graphics polling |
+| Android: Compose Live Preview | Live screenshot-based preview with params |
 | Android: Select Device | Set device for status bar |
 | Android: Select Module | Set module for status bar |
 | Android: Run (Selected Target) | Run using status bar selection |
 | Android: Stop App | Force stop selected app |
 | Android: Install APK | Install an APK |
+| Android: Install APK on Multiple Devices | Install APK on multiple devices |
+| Android: Device Matrix Run | Run app/tests on selected devices |
+| Android: Matrix Dashboard | Unified matrix UI with saved device presets |
+| Android: Gradle Doctor | Check and auto-fix Gradle environment issues |
+| Android: Save Emulator Snapshot | Save current emulator snapshot |
+| Android: Load Emulator Snapshot | Load emulator snapshot |
+| Android: Gradle Sync | Run Gradle sync task |
+| Android: Project Health Check | Check SDK/NDK/build-tools/project setup |
 | Android: Uninstall App | Uninstall package |
 | Android: Restart App | Force stop and launch |
 | Android: Open Logcat Viewer | Open Logcat panel |
@@ -194,6 +267,17 @@ New Project Wizard
 | Android: Create Asset | Create asset file |
 | Android: Create Language/Locale | Create locale resources |
 | Android: New Project | Create new Android project |
+| Mobile: Create Device | Create a simulator/device profile |
+| Mobile: Refresh Device Manager | Refresh device manager view |
+| Launch Device | Launch selected managed device |
+| Stop Device | Stop selected managed device |
+| Delete Device | Delete selected managed device |
+| Android: Open Test Runner | Run tests, view tree, rerun failed, matrix |
+| Android: Open Performance Profiler | Open profiler panel |
+| Android: Play App Signing Helper | Guide for upload key vs app signing key |
+| Android: Bundletool Build APKS | Build `.apks` from `.aab` |
+| Android: Bundletool Install APKS | Install `.apks` to device |
+| Android: Bump Version Code Wizard | Increment versionCode in Gradle file |
 
 ## Requirements
 - Android SDK
@@ -216,19 +300,64 @@ Kotlin language server crashes:
 
 No devices detected:
 - Run `adb devices` in a terminal and check USB authorization
+- Too many popups: set `androidToolkit.notifications.mode` to `quiet` in VS Code Settings
+
+## Release
+- `npm ci`
+- `npm run -s compile`
+- `npm run -s vscode:prepublish`
+- `vsce package`
+
+## License
+MIT
 
 ## Roadmap
-- Device and emulator auto sync
+- Emulator and device auto sync stability improvements
 - More project templates
-- Performance snapshots
+- Layout preview improvements
+- Better build diagnostics and quick fixes
 
 ## Changelog
+0.1.5
+- App Inspection parity: live network stream and kill+restart+clear-data action
+- Database diff snapshots
+- Compose live preview via emulator screenshot with hotspot hints
+- Test runner panel with tree view, rerun failed, and device matrix
+- Navigation graph jump tools and SVG graph layout with action arrows
+- Gradle Doctor auto-fixes and cache cleaner
+- Signing/release helpers: Play App Signing helper, bundletool build/install, versionCode bump
+- Matrix Dashboard with saved device presets
+- Telemetry integration and release cleanup (manifest dedupe, removed debug noise)
+
+0.1.4
+- Device selector bar (device, module, variant)
+- Run panel improvements
+- Gradle task explorer
+- Gradle build output panel with error parsing
+- Run configurations (pre-tasks, env vars, args)
+- APK analyzer and compare
+- APK install matrix (multi-device install)
+- App inspection and database inspector
+- Device file explorer and ADB shell
+- Layout preview and inspector
+- Manifest and resource tools
+- Signing wizard and build signed APK/AAB
+- Emulator snapshots
+
+0.1.3
+- Project health checks
+- Launch profiles
+- Build variants UI
+- Logcat presets and saved sessions
+
+0.1.2
+- Debug panel
+- Profiler (lite)
+- Emulator control improvements
+
 0.1.1
-- Run panel with build, install, run, clean
+- Run panel (build, install, run, clean)
 - Run on device
 - Gradle tasks
 - Drag and drop in project view
 - New project wizard
-
-## License
-MIT
