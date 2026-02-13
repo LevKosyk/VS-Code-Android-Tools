@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "VS Code Android Tools",
   "description": "Run, debug, and manage Android apps in VS Code with a focused Android toolkit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "levkosyk",
   "license": "MIT",
   "icon": "assets/logo/logo.png",
