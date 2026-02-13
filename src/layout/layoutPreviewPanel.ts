@@ -9,10 +9,16 @@ export class LayoutPreviewPanel {
     this.panel = panel;
   }
 
-  public static createOrShow(xml: string, title: string): LayoutPreviewPanel {
-    const column = vscode.window.activeTextEditor
-      ? vscode.window.activeTextEditor.viewColumn
-      : undefined;
+  public static createOrShow(
+    xml: string,
+    title: string,
+    targetColumn?: vscode.ViewColumn
+  ): LayoutPreviewPanel {
+    const column = targetColumn ?? (
+      vscode.window.activeTextEditor
+        ? vscode.window.activeTextEditor.viewColumn
+        : undefined
+    );
     if (LayoutPreviewPanel.currentPanel) {
       LayoutPreviewPanel.currentPanel.panel.reveal(column);
       LayoutPreviewPanel.currentPanel.panel.title = `Layout Preview: ${title}`;
@@ -52,6 +58,13 @@ export class LayoutPreviewPanel {
     .textview { padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 4px; background: #f8fafc; }
     .button { padding: 6px 10px; border: 1px solid #94a3b8; border-radius: 6px; background: #e2e8f0; }
     .image { width: 80px; height: 50px; background: #e5e7eb; border: 1px solid #cbd5e1; border-radius: 4px; }
+    .input { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #6b7280; }
+    .chip { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 999px; background: #f9fafb; font-size: 11px; }
+    .switch { width: 40px; height: 20px; border-radius: 999px; background: #cbd5e1; position: relative; }
+    .switch::after { content:''; width:16px; height:16px; border-radius:50%; background:#fff; position:absolute; left:2px; top:2px; }
+    .progress { width: 120px; height: 6px; border-radius: 4px; background: #e5e7eb; overflow: hidden; }
+    .progress > div { width: 45%; height: 100%; background: #60a5fa; }
+    .error { color:#b91c1c; font-size:12px; padding:8px; border:1px solid #fecaca; background:#fee2e2; border-radius:6px; }
     .linear.horizontal > .node-children { display: flex; gap: 8px; }
   </style>
 </head>
@@ -61,6 +74,7 @@ export class LayoutPreviewPanel {
     const xml = ${escaped};
     const parser = new DOMParser();
     const doc = parser.parseFromString(xml, 'text/xml');
+    const parseError = doc.querySelector('parsererror');
     const root = doc.documentElement;
     const host = document.getElementById('root');
     function getAttr(node, name) {
@@ -77,6 +91,7 @@ export class LayoutPreviewPanel {
       wrapper.appendChild(label);
       const content = document.createElement('div');
       content.className = 'node-children';
+      const children = Array.from(node.children || []);
       if (tag.endsWith('TextView')) {
         const el = document.createElement('div');
         el.className = 'textview';
@@ -87,12 +102,35 @@ export class LayoutPreviewPanel {
         el.className = 'button';
         el.textContent = getAttr(node, 'text') || 'Button';
         content.appendChild(el);
+      } else if (tag.endsWith('EditText')) {
+        const el = document.createElement('div');
+        el.className = 'input';
+        el.textContent = getAttr(node, 'hint') || getAttr(node, 'text') || 'EditText';
+        content.appendChild(el);
+      } else if (tag.endsWith('CheckBox')) {
+        const el = document.createElement('div');
+        el.className = 'chip';
+        el.textContent = '☐ ' + (getAttr(node, 'text') || 'CheckBox');
+        content.appendChild(el);
+      } else if (tag.endsWith('Switch')) {
+        const el = document.createElement('div');
+        el.className = 'switch';
+        content.appendChild(el);
+      } else if (tag.endsWith('ProgressBar')) {
+        const el = document.createElement('div');
+        el.className = 'progress';
+        el.innerHTML = '<div></div>';
+        content.appendChild(el);
       } else if (tag.endsWith('ImageView')) {
         const el = document.createElement('div');
         el.className = 'image';
         content.appendChild(el);
+      } else if (children.length === 0) {
+        const el = document.createElement('div');
+        el.className = 'chip';
+        el.textContent = tag;
+        content.appendChild(el);
       }
-      const children = Array.from(node.children || []);
       if (children.length > 0) {
         children.forEach(child => content.appendChild(renderNode(child)));
       }
@@ -103,7 +141,12 @@ export class LayoutPreviewPanel {
       wrapper.appendChild(content);
       return wrapper;
     }
-    if (root) {
+    if (parseError) {
+      const err = document.createElement('div');
+      err.className = 'error';
+      err.textContent = 'Invalid XML: ' + parseError.textContent.replace(/\\s+/g, ' ').trim();
+      host.appendChild(err);
+    } else if (root) {
       host.appendChild(renderNode(root));
     } else {
       host.textContent = 'Invalid XML';

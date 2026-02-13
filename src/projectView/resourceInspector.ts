@@ -8,6 +8,13 @@ interface ResourceItem {
   name: string;
   file: string;
 }
+type ResourceCacheEntry = {
+  at: number;
+  signature: string;
+  items: ResourceItem[];
+};
+const RESOURCE_CACHE_TTL_MS = 10_000;
+const resourceCache = new Map<string, ResourceCacheEntry>();
 
 function getResRoot(workspaceRoot: string): string | undefined {
   const candidates = [
@@ -28,6 +35,28 @@ function collectValuesResources(filePath: string): ResourceItem[] {
   return items;
 }
 
+function collectValuesResourcesCached(valuesDir: string): ResourceItem[] {
+  const files = fs.readdirSync(valuesDir).filter(f => f.endsWith('.xml'));
+  const signature = files
+    .map((file) => {
+      const filePath = path.join(valuesDir, file);
+      const stat = fs.statSync(filePath);
+      return `${file}:${stat.mtimeMs}:${stat.size}`;
+    })
+    .join('|');
+  const key = path.resolve(valuesDir);
+  const cached = resourceCache.get(key);
+  if (cached && Date.now() - cached.at < RESOURCE_CACHE_TTL_MS && cached.signature === signature) {
+    return cached.items;
+  }
+  const items: ResourceItem[] = [];
+  for (const file of files) {
+    items.push(...collectValuesResources(path.join(valuesDir, file)));
+  }
+  resourceCache.set(key, { at: Date.now(), signature, items });
+  return items;
+}
+
 export async function openResourceInspector(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
@@ -44,11 +73,7 @@ export async function openResourceInspector(): Promise<void> {
     showError('values directory not found.');
     return;
   }
-  const files = fs.readdirSync(valuesDir).filter(f => f.endsWith('.xml'));
-  const items: ResourceItem[] = [];
-  for (const file of files) {
-    items.push(...collectValuesResources(path.join(valuesDir, file)));
-  }
+  const items = collectValuesResourcesCached(valuesDir);
   if (items.length === 0) {
     showInfo('No resources found in values.');
     return;
@@ -102,25 +127,21 @@ export async function openResourceByQuery(): Promise<void> {
     return;
   }
   const valuesDir = path.join(resRoot, 'values');
-  const files = fs.readdirSync(valuesDir).filter(f => f.endsWith('.xml'));
-  for (const file of files) {
-    const filePath = path.join(valuesDir, file);
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const regex = new RegExp(`<${type}[^>]*name\\s*=\\s*\"${name}\"`);
-    if (regex.test(content)) {
-      const doc = await vscode.workspace.openTextDocument(filePath);
-      await vscode.window.showTextDocument(doc, { preview: false });
-      const idx = doc.getText().indexOf(`name="${name}"`);
-      if (idx >= 0) {
-        const pos = doc.positionAt(idx);
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          editor.selection = new vscode.Selection(pos, pos);
-          editor.revealRange(new vscode.Range(pos, pos));
-        }
+  const items = collectValuesResourcesCached(valuesDir);
+  const target = items.find((item) => item.type === type && item.name === name);
+  if (target) {
+    const doc = await vscode.workspace.openTextDocument(target.file);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    const idx = doc.getText().indexOf(`name="${name}"`);
+    if (idx >= 0) {
+      const pos = doc.positionAt(idx);
+      const editor = vscode.window.activeTextEditor;
+      if (editor) {
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(new vscode.Range(pos, pos));
       }
-      return;
     }
+    return;
   }
   showWarning('Resource not found.');
 }

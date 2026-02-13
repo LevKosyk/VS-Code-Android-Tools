@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { execCommand } from '../core/cli';
+import { measureAsync } from '../core/perf';
 
 export interface GradleTaskInfo {
   name: string;
@@ -9,6 +10,15 @@ export interface GradleTaskInfo {
   description: string;
   module?: string;
 }
+
+type GradleTaskCacheEntry = {
+  at: number;
+  tasks: GradleTaskInfo[];
+  refreshing?: boolean;
+};
+const GRADLE_TASK_CACHE_TTL_MS = 10_000;
+const GRADLE_TASK_STALE_TTL_MS = 60_000;
+const gradleTaskCache = new Map<string, GradleTaskCacheEntry>();
 
 export function getGradleCommand(workspaceRoot: string): string {
   const wrapper = process.platform === 'win32' ? 'gradlew.bat' : 'gradlew';
@@ -49,42 +59,84 @@ export async function runGradleTaskWithResult(
 }
 
 export async function listGradleTasks(workspaceRoot: string): Promise<GradleTaskInfo[]> {
+  const cacheKey = path.resolve(workspaceRoot);
+  const cached = gradleTaskCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < GRADLE_TASK_CACHE_TTL_MS) {
+    return cached.tasks;
+  }
+  if (cached && Date.now() - cached.at < GRADLE_TASK_STALE_TTL_MS) {
+    if (!cached.refreshing) {
+      cached.refreshing = true;
+      void (async () => {
+        try {
+          const refreshed = await fetchGradleTasks(workspaceRoot);
+          if (refreshed.length > 0) {
+            gradleTaskCache.set(cacheKey, { at: Date.now(), tasks: refreshed, refreshing: false });
+          } else {
+            cached.refreshing = false;
+          }
+        } catch {
+          cached.refreshing = false;
+        }
+      })();
+    }
+    return cached.tasks;
+  }
+  const tasks = await fetchGradleTasks(workspaceRoot);
+  gradleTaskCache.set(cacheKey, { at: Date.now(), tasks, refreshing: false });
+  return tasks;
+}
+
+async function fetchGradleTasks(workspaceRoot: string): Promise<GradleTaskInfo[]> {
   const gradleCmd = getGradleCommand(workspaceRoot);
-  const result = await execCommand(gradleCmd, ['tasks', '--all'], {
-    cwd: workspaceRoot,
-    timeout: 300_000,
-  });
+  const result = await measureAsync('gradle:listTasks:exec', () =>
+    execCommand(gradleCmd, ['tasks', '--all'], {
+      cwd: workspaceRoot,
+      timeout: 300_000,
+    })
+  );
   if (result.exitCode !== 0) {
     return [];
   }
-  const tasks: GradleTaskInfo[] = [];
-  const lines = result.stdout.split('\n');
-  let currentGroup = 'Other';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trimEnd();
-    if (!line.trim()) {
-      continue;
+  const tasks = await measureAsync('gradle:listTasks:parse', async () => {
+    const parsed: GradleTaskInfo[] = [];
+    const lines = result.stdout.split('\n');
+    let currentGroup = 'Other';
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trimEnd();
+      if (!line.trim()) {
+        continue;
+      }
+      if (lines[i + 1] && lines[i + 1].startsWith('-----')) {
+        currentGroup = line.trim();
+        continue;
+      }
+      const match = line.match(/^([:\\w.-]+)\\s+-\\s+(.+)$/);
+      if (!match) {
+        continue;
+      }
+      const fullName = match[1];
+      const description = match[2];
+      const moduleMatch = fullName.startsWith(':') ? fullName.split(':')[1] : undefined;
+      parsed.push({
+        name: fullName.split(':').pop() || fullName,
+        fullName,
+        group: currentGroup,
+        description,
+        module: moduleMatch || undefined,
+      });
     }
-    if (lines[i + 1] && lines[i + 1].startsWith('-----')) {
-      currentGroup = line.trim();
-      continue;
-    }
-    const match = line.match(/^([:\\w.-]+)\\s+-\\s+(.+)$/);
-    if (!match) {
-      continue;
-    }
-    const fullName = match[1];
-    const description = match[2];
-    const moduleMatch = fullName.startsWith(':') ? fullName.split(':')[1] : undefined;
-    tasks.push({
-      name: fullName.split(':').pop() || fullName,
-      fullName,
-      group: currentGroup,
-      description,
-      module: moduleMatch || undefined,
-    });
-  }
+    return parsed;
+  });
   return tasks;
+}
+
+export function invalidateGradleTaskCache(workspaceRoot?: string): void {
+  if (!workspaceRoot) {
+    gradleTaskCache.clear();
+    return;
+  }
+  gradleTaskCache.delete(path.resolve(workspaceRoot));
 }
 
 export function listVariantsFromTasks(tasks: GradleTaskInfo[], moduleName: string): string[] {

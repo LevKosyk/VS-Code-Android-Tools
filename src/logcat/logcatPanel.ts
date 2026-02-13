@@ -3,6 +3,9 @@ import { LogcatStream, logcatManager } from './logcatStream';
 import { LogEntry, LogFilter, LogLevel, LOG_LEVEL_NAMES, DEFAULT_FILTER } from './types';
 import { listDevices } from '../devices/deviceManager';
 import { showError, showInfo } from '../ui/notifications';
+import { detectSdk } from '../core/sdkDetector';
+import { execCommand } from '../core/cli';
+import { findApplicationId, findApplicationModules } from '../core/androidProject';
 export class LogcatPanel {
   public static currentPanel: LogcatPanel | undefined;
   private static readonly viewType = 'androidLogcat';
@@ -49,47 +52,67 @@ export class LogcatPanel {
     return LogcatPanel.currentPanel;
   }
   private async handleMessage(message: { type: string; [key: string]: unknown }): Promise<void> {
-    switch (message.type) {
-      case 'getDevices':
-        await this.sendDeviceList();
-        break;
-      case 'startStream':
-        await this.startStream(message.deviceId as string);
-        break;
-      case 'stopStream':
-        this.stopStream();
-        break;
-      case 'setFilter':
-        this.setFilter(message.filter as LogFilter);
-        break;
-      case 'clear':
-        this.clearLogs();
-        break;
-      case 'copyLine':
-        await vscode.env.clipboard.writeText(message.text as string);
-        showInfo('Log line copied to clipboard.');
-        break;
-      case 'getPresets':
-        this.sendPresets();
-        break;
-      case 'savePreset':
-        this.savePreset(message.name as string, message.filter as LogFilter);
-        break;
-      case 'deletePreset':
-        this.deletePreset(message.name as string);
-        break;
-      case 'applyPreset':
-        this.applyPreset(message.name as string);
-        break;
-      case 'getSessions':
-        this.sendSessions();
-        break;
-      case 'saveSession':
-        this.saveSession(message.name as string, message.deviceId as string, message.filter as LogFilter);
-        break;
-      case 'runSession':
-        this.runSession(message.name as string);
-        break;
+    const type = typeof message?.type === 'string' ? message.type : '';
+    try {
+      switch (type) {
+        case 'getDevices':
+          await this.sendDeviceList();
+          break;
+        case 'startStream':
+          await this.startStream(String(message.deviceId || ''));
+          break;
+        case 'stopStream':
+          this.stopStream();
+          break;
+        case 'setFilter':
+          this.setFilter((message.filter || DEFAULT_FILTER) as LogFilter);
+          break;
+        case 'clear':
+          this.clearLogs();
+          break;
+        case 'copyLine':
+          await vscode.env.clipboard.writeText(String(message.text || ''));
+          showInfo('Log line copied to clipboard.');
+          break;
+        case 'getPresets':
+          this.sendPresets();
+          break;
+        case 'savePreset':
+          this.savePreset(String(message.name || ''), (message.filter || DEFAULT_FILTER) as LogFilter);
+          break;
+        case 'deletePreset':
+          this.deletePreset(String(message.name || ''));
+          break;
+        case 'applyPreset':
+          this.applyPreset(String(message.name || ''));
+          break;
+        case 'getSessions':
+          this.sendSessions();
+          break;
+        case 'saveSession':
+          this.saveSession(String(message.name || ''), String(message.deviceId || ''), (message.filter || DEFAULT_FILTER) as LogFilter);
+          break;
+        case 'runSession':
+          this.runSession(String(message.name || ''));
+          break;
+        case 'togglePinPreset':
+          this.togglePinPreset(String(message.name || ''));
+          break;
+        case 'onlyThisApp':
+          await this.applyOnlyThisApp(String(message.deviceId || ''));
+          break;
+        case 'exportLogs':
+          await this.exportLogs(message.entries as string[] | undefined, Boolean(message.onlySelected));
+          break;
+        default:
+          this.postMessage({ type: 'error', message: `Unsupported Logcat action: ${type || 'unknown'}` });
+          break;
+      }
+    } catch (error) {
+      this.postMessage({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Logcat action failed',
+      });
     }
   }
   private getPresets(): Array<{ name: string; filter: LogFilter }> {
@@ -98,9 +121,28 @@ export class LogcatPanel {
   private updatePresets(presets: Array<{ name: string; filter: LogFilter }>): void {
     this.context.globalState.update('android-tools.logcatPresets', presets);
   }
+  private getPinnedPresets(): string[] {
+    return this.context.globalState.get('android-tools.logcatPinnedPresets', []);
+  }
+  private updatePinnedPresets(names: string[]): void {
+    this.context.globalState.update('android-tools.logcatPinnedPresets', Array.from(new Set(names)));
+  }
   private sendPresets(): void {
     const presets = this.getPresets();
-    this.postMessage({ type: 'presets', presets });
+    const pinned = this.getPinnedPresets();
+    this.postMessage({ type: 'presets', presets, pinned });
+  }
+  private togglePinPreset(name: string): void {
+    if (!name) {
+      return;
+    }
+    const pinned = this.getPinnedPresets();
+    if (pinned.includes(name)) {
+      this.updatePinnedPresets(pinned.filter(p => p !== name));
+    } else {
+      this.updatePinnedPresets([...pinned, name]);
+    }
+    this.sendPresets();
   }
   private savePreset(name: string, filter: LogFilter): void {
     if (!name) {
@@ -166,6 +208,54 @@ export class LogcatPanel {
     }
     this.postMessage({ type: 'sessionApplied', session });
     this.startStream(session.deviceId);
+  }
+  private async applyOnlyThisApp(deviceId: string): Promise<void> {
+    if (!deviceId) {
+      this.postMessage({ type: 'error', message: 'Select a device first.' });
+      return;
+    }
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      this.postMessage({ type: 'error', message: 'No workspace open.' });
+      return;
+    }
+    const modules = findApplicationModules(workspaceRoot);
+    const moduleName = modules[0];
+    if (!moduleName) {
+      this.postMessage({ type: 'error', message: 'No app module found.' });
+      return;
+    }
+    const packageName = findApplicationId(workspaceRoot, moduleName);
+    if (!packageName) {
+      this.postMessage({ type: 'error', message: 'Cannot resolve applicationId.' });
+      return;
+    }
+    const sdk = detectSdk();
+    const pidResult = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'pidof', packageName], { timeout: 5000 });
+    const pid = parseInt((pidResult.stdout || '').trim().split(/\s+/)[0], 10);
+    if (!Number.isFinite(pid)) {
+      this.postMessage({ type: 'error', message: `App is not running: ${packageName}` });
+      return;
+    }
+    this.setFilter({ ...this.filter, packageName, pid });
+    this.postMessage({ type: 'onlyThisAppApplied', packageName, pid });
+  }
+  private async exportLogs(entries: string[] | undefined, onlySelected: boolean): Promise<void> {
+    const payload = entries?.filter(Boolean).join('\n') || '';
+    if (!payload) {
+      this.postMessage({ type: 'error', message: onlySelected ? 'No selected logs to export.' : 'No logs to export.' });
+      return;
+    }
+    const uri = await vscode.window.showSaveDialog({
+      title: onlySelected ? 'Export Selected Logs' : 'Export Logs',
+      filters: { 'Log files': ['log', 'txt'] },
+      saveLabel: 'Export',
+    });
+    if (!uri) {
+      return;
+    }
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(payload, 'utf8'));
+    showInfo(`Log export saved: ${uri.fsPath}`);
   }
   private async sendDeviceList(): Promise<void> {
     try {
@@ -350,6 +440,7 @@ export class LogcatPanel {
       border-radius: 2px;
       cursor: pointer;
     }
+    .log-line.selected { outline: 1px solid #4fc3f7; background: #4fc3f722; }
     .log-line:hover { background: var(--vscode-list-hoverBackground); }
     .log-time { color: #888; width: 85px; flex-shrink: 0; }
     .log-level { width: 18px; flex-shrink: 0; font-weight: bold; text-align: center; }
@@ -392,6 +483,7 @@ export class LogcatPanel {
     </select>
     <input type="text" id="presetName" placeholder="Preset name">
     <button id="savePresetBtn">Save</button>
+    <button id="pinPresetBtn">Pin</button>
     <button id="deletePresetBtn">Delete</button>
     <select id="sessionSelect">
       <option value="">Sessions</option>
@@ -401,8 +493,13 @@ export class LogcatPanel {
     <button id="runSessionBtn">Run Session</button>
     <button id="errorsBtn">Errors</button>
     <button id="warningsBtn">Warnings+</button>
+    <button id="onlyAppBtn">Only this app</button>
+    <button id="exportSelectedBtn">Export selected</button>
+    <button id="exportAllBtn">Export all</button>
+    <span id="bufferInfo" class="status" style="margin-left:8px;">Rendered: 0</span>
     <span id="status" class="status">Stopped</span>
   </div>
+  <div class="toolbar" id="pinnedToolbar" style="padding-top:0"></div>
     <div class="log-container" id="logContainer">
       <div class="empty-state">Select a device and click Start to view logs</div>
     </div>
@@ -418,6 +515,7 @@ export class LogcatPanel {
     const presetSelect = document.getElementById('presetSelect');
     const presetName = document.getElementById('presetName');
     const savePresetBtn = document.getElementById('savePresetBtn');
+    const pinPresetBtn = document.getElementById('pinPresetBtn');
     const deletePresetBtn = document.getElementById('deletePresetBtn');
     const sessionSelect = document.getElementById('sessionSelect');
     const sessionName = document.getElementById('sessionName');
@@ -425,11 +523,21 @@ export class LogcatPanel {
     const runSessionBtn = document.getElementById('runSessionBtn');
     const errorsBtn = document.getElementById('errorsBtn');
     const warningsBtn = document.getElementById('warningsBtn');
+    const onlyAppBtn = document.getElementById('onlyAppBtn');
+    const exportSelectedBtn = document.getElementById('exportSelectedBtn');
+    const exportAllBtn = document.getElementById('exportAllBtn');
+    const pinnedToolbar = document.getElementById('pinnedToolbar');
+    const bufferInfoEl = document.getElementById('bufferInfo');
     const statusEl = document.getElementById('status');
     const logContainer = document.getElementById('logContainer');
-    const MAX_RENDERED_LINES = 5000;
+    const MAX_RENDERED_LINES = 1500;
     let isRunning = false;
     let autoScroll = true;
+    const selectedLogLines = new Set();
+    let allRenderedLines = [];
+    let pinnedPresets = [];
+    let onlyAppPid = undefined;
+    let droppedLines = 0;
     vscode.postMessage({ type: 'getDevices' });
     vscode.postMessage({ type: 'getPresets' });
     vscode.postMessage({ type: 'getSessions' });
@@ -445,6 +553,8 @@ export class LogcatPanel {
     clearBtn.addEventListener('click', () => {
       vscode.postMessage({ type: 'clear' });
       logContainer.innerHTML = '';
+      droppedLines = 0;
+      updateBufferInfo();
     });
     levelSelect.addEventListener('change', sendFilter);
     tagFilter.addEventListener('input', debounce(sendFilter, 300));
@@ -483,6 +593,11 @@ export class LogcatPanel {
       if (!name) { return; }
       vscode.postMessage({ type: 'deletePreset', name });
     });
+    pinPresetBtn.addEventListener('click', () => {
+      const name = presetSelect.value;
+      if (!name) { return; }
+      vscode.postMessage({ type: 'togglePinPreset', name });
+    });
     saveSessionBtn.addEventListener('click', () => {
       const name = sessionName.value.trim();
       const deviceId = deviceSelect.value;
@@ -511,11 +626,21 @@ export class LogcatPanel {
       levelSelect.value = 'W';
       sendFilter();
     });
+    onlyAppBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'onlyThisApp', deviceId: deviceSelect.value });
+    });
+    exportSelectedBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'exportLogs', onlySelected: true, entries: Array.from(selectedLogLines.values()) });
+    });
+    exportAllBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'exportLogs', onlySelected: false, entries: allRenderedLines });
+    });
     function sendFilter() {
       vscode.postMessage({
         type: 'setFilter',
         filter: {
           minLevel: levelSelect.value,
+          pid: onlyAppPid,
           tag: tagFilter.value || undefined,
           search: searchFilter.value || undefined,
         }
@@ -557,7 +682,11 @@ export class LogcatPanel {
           break;
         case 'entries':
           logContainer.innerHTML = '';
+          selectedLogLines.clear();
+          allRenderedLines = [];
+          droppedLines = 0;
           appendEntriesBatch(message.entries || []);
+          updateBufferInfo();
           break;
         case 'cleared':
           logContainer.innerHTML = '';
@@ -567,12 +696,14 @@ export class LogcatPanel {
           break;
         case 'presets':
           presetSelect.innerHTML = '<option value=\"\">Presets</option>';
+          pinnedPresets = message.pinned || [];
           message.presets.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.name;
             opt.textContent = p.name;
             presetSelect.appendChild(opt);
           });
+          renderPinnedPresets();
           break;
         case 'sessions':
           sessionSelect.innerHTML = '<option value=\"\">Sessions</option>';
@@ -600,12 +731,47 @@ export class LogcatPanel {
             sendFilter();
           }
           break;
+        case 'onlyThisAppApplied':
+          onlyAppPid = message.pid;
+          sendFilter();
+          break;
       }
     });
+    function renderPinnedPresets() {
+      pinnedToolbar.innerHTML = '';
+      if (!pinnedPresets || pinnedPresets.length === 0) {
+        return;
+      }
+      const title = document.createElement('span');
+      title.textContent = 'Pinned:';
+      title.style.opacity = '0.8';
+      pinnedToolbar.appendChild(title);
+      pinnedPresets.forEach(name => {
+        const b = document.createElement('button');
+        b.textContent = name;
+        b.className = 'secondary';
+        b.addEventListener('click', () => vscode.postMessage({ type: 'applyPreset', name }));
+        pinnedToolbar.appendChild(b);
+      });
+    }
+    function updateBufferInfo() {
+      bufferInfoEl.textContent = 'Rendered: ' + logContainer.children.length + ' | Dropped: ' + droppedLines;
+    }
     function appendEntry(entry) {
       const div = document.createElement('div');
       div.className = 'log-line';
-      div.dataset.raw = entry.timestamp + ' ' + entry.level + '/' + entry.tag + ': ' + entry.message;
+      const rawLine = entry.timestamp + ' ' + entry.level + '/' + entry.tag + ': ' + entry.message;
+      div.dataset.raw = rawLine;
+      allRenderedLines.push(rawLine);
+      div.addEventListener('click', () => {
+        if (selectedLogLines.has(rawLine)) {
+          selectedLogLines.delete(rawLine);
+          div.classList.remove('selected');
+        } else {
+          selectedLogLines.add(rawLine);
+          div.classList.add('selected');
+        }
+      });
       div.innerHTML = 
         '<span class="log-time">' + entry.timestamp.substring(6) + '</span>' +
         '<span class="log-level level-' + entry.level + '">' + entry.level + '</span>' +
@@ -615,7 +781,14 @@ export class LogcatPanel {
     }
     function trimRenderedLines() {
       while (logContainer.children.length > MAX_RENDERED_LINES) {
-        logContainer.removeChild(logContainer.firstChild);
+        const first = logContainer.firstChild;
+        const raw = first && first.dataset ? first.dataset.raw : undefined;
+        if (raw) {
+          selectedLogLines.delete(raw);
+        }
+        logContainer.removeChild(first);
+        allRenderedLines.shift();
+        droppedLines++;
       }
     }
     function appendEntriesBatch(entries) {
@@ -628,6 +801,7 @@ export class LogcatPanel {
       }
       logContainer.appendChild(frag);
       trimRenderedLines();
+      updateBufferInfo();
       if (autoScroll) {
         logContainer.scrollTop = logContainer.scrollHeight;
       }
@@ -637,6 +811,7 @@ export class LogcatPanel {
       div.textContent = text;
       return div.innerHTML;
     }
+    updateBufferInfo();
   </script>
 </body>
 </html>`;

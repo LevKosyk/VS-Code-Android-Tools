@@ -2,6 +2,12 @@ import { execCommand } from '../core/cli';
 import { detectSdk } from '../core/sdkDetector';
 import { AdbError } from '../core/errors';
 import { AndroidDevice, DeviceStatus } from './types';
+type DeviceCacheEntry = {
+  at: number;
+  devices: AndroidDevice[];
+};
+const DEVICE_CACHE_TTL_MS = 3000;
+let deviceCache: DeviceCacheEntry | undefined;
 function parseDeviceStatus(status: string): DeviceStatus {
   switch (status.toLowerCase()) {
     case 'device':
@@ -69,6 +75,9 @@ export async function getDeviceInfo(deviceId: string): Promise<Partial<AndroidDe
   return info;
 }
 export async function listDevicesDetailed(): Promise<AndroidDevice[]> {
+  if (deviceCache && Date.now() - deviceCache.at < DEVICE_CACHE_TTL_MS) {
+    return deviceCache.devices;
+  }
   const devices = await listDevices();
   const detailedDevices = await Promise.all(
     devices.map(async (device) => {
@@ -79,7 +88,11 @@ export async function listDevicesDetailed(): Promise<AndroidDevice[]> {
       return device;
     })
   );
+  deviceCache = { at: Date.now(), devices: detailedDevices };
   return detailedDevices;
+}
+export function invalidateDeviceCache(): void {
+  deviceCache = undefined;
 }
 export async function isDeviceConnected(deviceId: string): Promise<boolean> {
   const devices = await listDevices();

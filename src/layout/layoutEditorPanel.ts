@@ -90,6 +90,11 @@ export class LayoutEditorPanel {
         });
         return;
       }
+      case 'fixAllLayoutWarnings': {
+        await vscode.commands.executeCommand('android-toolkit.fixAllLayoutWarnings', this.document.uri.toString());
+        this.postMessage({ type: 'externalXml', xml: this.document.getText() });
+        return;
+      }
     }
   }
 
@@ -339,6 +344,7 @@ export class LayoutEditorPanel {
         <button id="fixAllDiagnosticsBtn" class="btn">Auto-Fix All</button>
         <button id="undoDiagFixBtn" class="btn">Undo Last Fix</button>
       </div>
+      <button id="fixAllAndroidLintBtn" class="btn">Fix All (Android Lint)</button>
       <div class="toolbar">
         <button id="applyPreviewBtn" class="btn">Apply Preview</button>
         <button id="discardPreviewBtn" class="btn">Discard Preview</button>
@@ -375,6 +381,7 @@ export class LayoutEditorPanel {
     const applyPropsBtn = document.getElementById('applyPropsBtn');
     const fixAllDiagnosticsBtn = document.getElementById('fixAllDiagnosticsBtn');
     const undoDiagFixBtn = document.getElementById('undoDiagFixBtn');
+    const fixAllAndroidLintBtn = document.getElementById('fixAllAndroidLintBtn');
     const toggleLiveBtn = document.getElementById('toggleLiveBtn');
     const snapGridEl = document.getElementById('snapGrid');
     const gridSizeEl = document.getElementById('gridSize');
@@ -633,6 +640,7 @@ export class LayoutEditorPanel {
       setButtonDisabled(distHBtn, selectedCount < 2);
       setButtonDisabled(distVBtn, selectedCount < 2);
       setButtonDisabled(fixAllDiagnosticsBtn, !hasDiagnostics);
+      setButtonDisabled(fixAllAndroidLintBtn, !nodes.length);
       setButtonDisabled(undoDiagFixBtn, diagnosticsFixUndoStack.length === 0);
       setButtonDisabled(applyPreviewBtn, !hasPreview);
       setButtonDisabled(discardPreviewBtn, !hasPreview);
@@ -1297,6 +1305,9 @@ export class LayoutEditorPanel {
     distHBtn.addEventListener('click', () => applySelectionLayout('distH'));
     distVBtn.addEventListener('click', () => applySelectionLayout('distV'));
     fixAllDiagnosticsBtn.addEventListener('click', () => applyAllDiagnostics());
+    fixAllAndroidLintBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'fixAllLayoutWarnings' });
+    });
     undoDiagFixBtn.addEventListener('click', () => undoLastDiagnosticsFix());
     applyPreviewBtn.addEventListener('click', () => applyPreviewedDiagnostics());
     discardPreviewBtn.addEventListener('click', () => discardPreviewedDiagnostics());

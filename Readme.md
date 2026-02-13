@@ -6,11 +6,21 @@
 
 Run, debug, and control Android apps in VS Code without Android Studio.
 
-Android Sidecar is a lightweight VS Code extension that brings the most used Android Studio workflows into VS Code. It is not a replacement for Android Studio.
+Android Tools is a lightweight VS Code extension that brings the most used Android Studio workflows into VS Code. It is not a replacement for Android Studio.
 
-![File System](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/file-system.gif)
+![Android Project View](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/file-system.gif)
 
-![Phone Launch](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/phone-launch.gif)
+![Run On Device](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/phone-launch.gif)
+
+## Visual Demos
+Run Panel Quick Actions:
+![Run Panel](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/run-panel.gif)
+
+XML Live Preview:
+![XML Live Preview](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/xml-live-preview.gif)
+
+ConstraintSet Snippet Generator:
+![ConstraintSet Snippet Generator](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/constraintset.gif)
 
 ## Quick Start
 1. Install Android SDK and Emulator tools.
@@ -34,6 +44,8 @@ Android Project View
 - Drag and drop to move files and folders between directories
 - Conflict-safe moves (auto-renames when target name already exists)
 - Move preview before drop with confirm/cancel
+- Undo last move/delete from Android Project view
+- Delete moves items into `.android-tools-trash` with quick restore
 
 Emulator Control
 - Rotation, screenshots
@@ -48,6 +60,10 @@ Logcat Viewer
 - Live stream, filter by tag, level, or search
 - Clear logs
 - Save filter presets
+- Pin favorite presets for one-click use
+- One-click `Only this app` filter (by app PID)
+- Export selected log lines or full visible log
+- Render window optimization for long sessions (bounded DOM + dropped counter)
 
 Debugging
 - Attach and detach
@@ -61,6 +77,24 @@ Profiler (Lite)
 Run Panel
 - Select module, device, and build variant
 - Build, install, run, clean
+- Stop action near Run
+- Recent run history + quick re-run
+- History search/filter (all / current module / current device)
+- Quick presets: Debug on emulator / Release on device
+- Pinned presets (quick one-click row)
+- Run Panel keyboard: `Enter` = Run, `Cmd/Ctrl + R` = Re-run selected history
+- Runtime health status (Java/Kotlin stability)
+- Preflight checks with fix suggestions before run/install/build
+- Auto-recovery for common failures (ADB reconnect, install retry, Gradle daemon retry)
+- Smart device pick from last successful run (module + variant aware)
+- Gradle diagnostics classifier v2 (better top-error reason + targeted quick fixes)
+- Cancel active long-running operation from Command Palette
+- Smart empty-state hints with one-click quick fixes (module/device/workspace/SDK)
+- Built-in Quick Actions row (Run Selected / Stop Selected / Logcat This App / Health Wizard)
+
+First-Run Health Wizard
+- One-shot startup check for SDK, Java/Kotlin, modules, and devices
+- Quick actions to auto-fix common setup issues
 
 Device Selector Bar
 - Persistent status bar controls for device, module, and variant
@@ -73,10 +107,21 @@ Gradle Sync + Project Health
 Gradle Task Explorer
 - Browse tasks by group
 - One click run
+- Stale-cache return with background refresh for faster open
 
 Gradle Build Output Panel
 - Dedicated Gradle output channel
 - Error parsing with file/line links
+
+Problems View
+- Collects failed Run/Build/Install/Clean actions
+- One-click fix actions from failure context
+- Jump to source location when file/line is available
+- Run Failure Report command with top-10 grouped failure reasons
+
+Matrix Runs
+- Install matrix retries failed devices automatically for recoverable ADB failures
+- Matrix output includes attempt counts
 
 Build Variants
 - Pick debug, release, and product flavors
@@ -127,6 +172,7 @@ ADB Shell
 
 Layout Preview (Lite)
 - Static preview for layout XML
+- XML Live Preview beside editor (updates while typing)
 - Layout Editor (Lite): drag-and-drop components, properties, constraint handles, snap-to-grid, alignment guides
 - Multi-select with Cmd/Ctrl-click, align/distribute actions, and delete selected
 - Undo/Redo support for layout edits
@@ -172,6 +218,8 @@ Signing and Release
 - Bundletool integration (`build-apks`, `install-apks`)
 - VersionCode bump wizard
 - Auto-detect `bundletool.jar` from project/home common locations
+- Release Flow Wizard: Select Variant -> Build -> Sign -> Install/Test
+- Release checklist (versionCode/signing/manifest flags)
 
 Manifest and Resource Tools
 - Insert templates
@@ -182,10 +230,87 @@ Manifest and Resource Tools
 - Navigation graph helpers (destination/argument jump + SVG preview)
 - Graph layout with action arrows in SVG preview
 
+XML Authoring (New)
+- Snippet completions for common Android layout views/attrs in `res/layout/*.xml`
+- Faster writing for ConstraintLayout child blocks and base attributes
+- `tools:*` authoring helpers (`tools:text`, `tools:visibility`, `tools:src`, `tools:ignore`)
+- Generate Kotlin `ConstraintSet` snippet directly from selected XML views
+- Layout XML lint on save (hardcoded text, missing `contentDescription`, missing constraints)
+- Quick Fix actions for XML warnings
+- Extract selected XML text into `res/values/strings.xml`
+
 New Project Wizard
 - App name, package, language
+- Template selection:
+  - Views: Empty Activity
+  - Views: Bottom Navigation
+  - Compose: Empty Activity (Kotlin)
 - Activity, manifest, resources
 - Gradle files and wrapper when available
+
+## How To Use (New Features)
+### 1) First Launch Setup
+1. Run `Android: First-Run Health Wizard`.
+2. If SDK is missing, click `SDK Setup Guide` in wizard and install command-line tools.
+3. If Java 25 is detected, run `Android: Use JDK 21 Path`.
+4. Open `Android: Open Run Panel` when checks are green.
+
+### 2) Fast Run / Stop Flow
+1. Open `Android: Open Run Panel`.
+2. Select `Module`, `Device`, `Variant`.
+3. Use core actions: `Build`, `Install`, `Run`, `Stop`, `Clean`.
+4. Use presets for speed:
+- `Debug on Emulator`
+- `Release on Device`
+5. Use built-in quick actions:
+- `Run Selected`
+- `Stop Selected`
+- `Logcat This App`
+- `Health Wizard`
+
+### 3) XML Live Preview Workflow
+1. Open any file in `res/layout/*.xml`.
+2. Run `Android: Open XML Live Preview` to open preview beside code.
+3. Optional: run `Android: Toggle XML Live Preview` for auto-updates while typing.
+4. Write XML and observe updates in preview.
+
+Shortcuts:
+- `Ctrl/Cmd + Alt + P` => open XML live preview
+- `Ctrl/Cmd + Alt + Shift + P` => toggle live preview
+
+### 4) Faster XML Authoring
+In `res/layout/*.xml`, use completion for:
+- View snippets: `TextView (android)`, `Button (android)`, `Constraint Item`
+- Attributes: `android:id`, `android:text`, `android:layout_width`, `android:layout_height`
+- Design-time helpers: `tools:text`, `tools:visibility`, `tools:src`, `tools:ignore`
+
+Also available:
+- Save layout XML to run lint checks automatically.
+- Use lightbulb quick fixes for common issues.
+- Run `Android: Extract String Resource from XML` (or `Ctrl/Cmd + Alt + E`) to move hardcoded text into `strings.xml`.
+- Run `Android: Extract All Hardcoded Strings (Layout)` for batch extraction in one pass.
+- Run `Android: Fix All Layout Warnings` for one-click bulk fixes in current file.
+- In Layout Editor (Lite), use the new **Fix All (Android Lint)** button in Constraint Diagnostics.
+- Golden snapshot tests cover before/after XML auto-fix behavior.
+
+### 5) ConstraintSet Generator
+1. Select one or more views in layout XML that have `android:id`.
+2. Run `Android: Generate ConstraintSet Snippet from Selection`.
+3. Extension opens Kotlin `ConstraintSet` boilerplate in new editor.
+
+Shortcut:
+- `Ctrl/Cmd + Alt + Shift + C`
+
+### 6) Quick Commands + Hotkeys
+- `Ctrl/Cmd + Alt + R` => `Android: Run Selected (Quick)`
+- `Ctrl/Cmd + Alt + Shift + R` => `Android: Stop Selected (Quick)`
+- `Ctrl/Cmd + Alt + L` => `Android: Logcat This App (Quick)`
+
+### 7) If Something Fails
+1. Run `Android: Cancel Active Operation`.
+2. Run `Android: Collect Diagnostics Snapshot`.
+3. In Run Panel error block, click `Open Gradle Output`.
+4. Re-run from Run Panel.
 
 ## Commands
 | Command | Description |
@@ -199,17 +324,28 @@ New Project Wizard
 | Android: Run App on Emulator | Build, install, run on emulator |
 | Android: Run App on Device | Build, install, run on device |
 | Android: Open Run Panel | Build, install, run, clean in one panel |
+| Android: First-Run Health Wizard | Guided setup checks + quick fixes |
+| Android: Run Selected (Quick) | Alias for running selected target |
+| Android: Stop Selected (Quick) | Alias for stopping selected app |
+| Android: Logcat This App (Quick) | Open Logcat and jump to app-focused flow |
+| Android: Cancel Active Operation | Request cancellation for current long action |
+| Android: Collect Diagnostics Snapshot | Export environment/device/module diagnostics to markdown |
+| Android: Open Run Failure Report | Show top grouped run/build/install failure reasons |
 | Android: Select Build Variant | Choose debug/release/flavor |
 | Android: Gradle Assemble Debug | Assemble debug variant |
 | Android: Gradle Install Debug | Install debug via Gradle |
 | Android: Gradle Clean | Clean project |
 | Android: Run Gradle Task | Run a Gradle task |
 | Android: Refresh Gradle Tasks | Refresh task list |
+| Android: Clear Problems | Clear Android Problems view |
+| Android: Apply Problem Fix | Execute selected fix action from Problems view |
+| Android: Open Problem Location | Open source location from Problems view |
 | Android: Create Launch Profile | Save a launch profile |
 | Android: Run Launch Profile | Run a launch profile |
 | Android: Delete Launch Profile | Delete a launch profile |
 | Android: Rename | Rename selected file/folder in Android project view |
 | Android: Delete | Delete selected file/folder in Android project view |
+| Android: Undo Last Project Action | Undo last move/delete in project view |
 | Android: Create Run Configuration | Create a run configuration |
 | Android: Run Run Configuration | Run a saved configuration |
 | Android: Delete Run Configuration | Delete a configuration |
@@ -222,6 +358,7 @@ New Project Wizard
 | Android: Build Cache Inspector | Show build cache stats and issues |
 | Android: Dependency Insight | Run Gradle dependency insight |
 | Android: Signing Wizard | Generate keystore and setup signing |
+| Android: Release Flow Wizard | Guided variant/build/sign/install release flow |
 | Android: Build Signed APK | Build release APK |
 | Android: Build Signed AAB | Build release bundle |
 | Android: Refresh Device Explorer | Refresh device files |
@@ -230,6 +367,13 @@ New Project Wizard
 | Android: Delete From Device | Delete device files |
 | Android: Open ADB Shell | Open shell terminal |
 | Android: Preview Layout | Show layout preview |
+| Android: Open XML Live Preview | Open side-by-side live XML preview |
+| Android: Toggle XML Live Preview | Turn on/off auto-update preview while typing |
+| Android: Generate ConstraintSet Snippet from Selection | Build Kotlin ConstraintSet boilerplate from selected view ids |
+| Android: Lint Current Layout XML | Run layout XML lint checks immediately |
+| Android: Extract String Resource from XML | Extract selected XML value to `strings.xml` and replace with `@string/...` |
+| Android: Extract All Hardcoded Strings (Layout) | Batch-extract hardcoded `android:text`/`android:hint`/`android:contentDescription` from current layout |
+| Android: Fix All Layout Warnings | One-click fix for missing constraints/contentDescription + bulk hardcoded string extraction |
 | Android: Open Layout Editor (Lite) | Drag-drop layout editor with properties and XML sync |
 | Android: Layout Inspector | View bounds and overlay |
 | Android: Compose Preview (Lite) | List and open `@Preview` composables |
@@ -287,6 +431,7 @@ New Project Wizard
 | Android: Create Asset | Create asset file |
 | Android: Create Language/Locale | Create locale resources |
 | Android: New Project | Create new Android project |
+| Android: Use JDK 21 Path | Set JDK path for Java/Kotlin extension reliability |
 | Mobile: Create Device | Create a simulator/device profile |
 | Mobile: Refresh Device Manager | Refresh device manager view |
 | Launch Device | Launch selected managed device |
@@ -322,20 +467,49 @@ No devices detected:
 - Run `adb devices` in a terminal and check USB authorization
 - Too many popups: set `androidToolkit.notifications.mode` to `quiet` in VS Code Settings
 
+Performance tips:
+- Keep `androidToolkit.performance.deferBackgroundMonitoring = true` (default).
+- Use `Android: Cancel Active Operation` if a long action blocks your workflow.
+- Use `Android: Open Run Panel` quick actions instead of opening many separate panels.
+
 ## Release
 - `npm ci`
 - `npm run -s compile`
+- `npm run -s test`
+- `npm run -s test:p0`
+- `npm run -s test:runtime` *(requires `@vscode/test-electron`)*
 - `npm run -s vscode:prepublish`
 - `vsce package`
 
 ## License
 MIT
 
+## CI Quality Gates
+- GitHub Actions CI runs on every push/PR.
+- Compile + unit/smoke + P0 tests.
+- Performance budgets:
+ - Gradle variant parser hot-path latency budget.
+ - Extension bundle size budget.
+
+## Release Commands
+- `npm run release:check` — compile + lint + tests + P0 smoke.
+- `npm run release:package` — full release check + VSIX build.
+- Hard release checklist: `RELEASE_CHECKLIST.md`.
+
 ## Roadmap
+Completed:
 - Emulator and device auto sync stability improvements
+: Auto-sync polling with configurable interval (`androidToolkit.sync.autoSync.*`) and refresh across core Android views.
 - More project templates
+: New project templates for `Views: Empty Activity`, `Views: Bottom Navigation`, and `Compose: Empty Activity` (Kotlin).
 - Layout preview improvements
+: Side-by-side XML live preview, toggleable auto-update while typing, richer widget rendering, and clearer invalid XML errors.
 - Better build diagnostics and quick fixes
+: Run Panel now suggests targeted fixes like `Use JDK 21 Path`, `Run Gradle Doctor`, variant/device selectors, SDK guide, and Gradle output.
+- Kotlin/Java runtime reliability guardrails
+: Java version checks, Java 25 warning path, one-click JDK 21 path setup, and runtime health in Run Panel.
+- More automated extension tests (smoke + parser/unit)
+: Added smoke, P0 scenario, parser/unit, operation guard, and runtime smoke harness scripts.
 
 ## Changelog
 0.1.5

@@ -327,3 +327,88 @@ export async function bumpVersionCodeWizard(): Promise<void> {
   fs.writeFileSync(file, updated);
   showInfo(`versionCode bumped: ${current} -> ${next}`);
 }
+
+function checkReleaseChecklist(workspaceRoot: string, moduleName: string): string[] {
+  const issues: string[] = [];
+  const file = getAppGradlePath(workspaceRoot, moduleName);
+  if (!file) {
+    issues.push('build.gradle(.kts) not found');
+    return issues;
+  }
+  const content = fs.readFileSync(file, 'utf-8');
+  const versionCodeMatch = content.match(/versionCode\s*(=)?\s*(\d+)/);
+  if (!versionCodeMatch) {
+    issues.push('versionCode is missing');
+  }
+  if (!content.includes('signingConfig')) {
+    issues.push('release signingConfig not detected');
+  }
+  const manifestPath = path.join(workspaceRoot, moduleName, 'src', 'main', 'AndroidManifest.xml');
+  if (fs.existsSync(manifestPath)) {
+    const manifest = fs.readFileSync(manifestPath, 'utf-8');
+    if (/android:debuggable\s*=\s*"true"/.test(manifest)) {
+      issues.push('manifest has android:debuggable="true"');
+    }
+    if (/usesCleartextTraffic\s*=\s*"true"/.test(manifest)) {
+      issues.push('manifest allows cleartext traffic');
+    }
+  }
+  return issues;
+}
+
+export async function runReleaseFlowWizard(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const modules = findApplicationModules(workspaceRoot);
+  const moduleName = modules.length === 1 ? modules[0] : await vscode.window.showQuickPick(modules, { placeHolder: 'Select app module' });
+  if (!moduleName) {
+    return;
+  }
+  const variants = ['Release', 'Debug'];
+  const variant = await vscode.window.showQuickPick(variants, { placeHolder: 'Select variant' });
+  if (!variant) {
+    return;
+  }
+  const checklist = checkReleaseChecklist(workspaceRoot, moduleName);
+  if (checklist.length > 0) {
+    const proceed = await vscode.window.showWarningMessage(
+      `Release checklist has issues:\n- ${checklist.join('\n- ')}`,
+      'Continue Anyway'
+    );
+    if (proceed !== 'Continue Anyway') {
+      return;
+    }
+  } else {
+    showInfo('Release checklist passed.');
+  }
+  const withSigning = await vscode.window.showQuickPick(['Sign Build', 'Build Only'], {
+    placeHolder: 'Build mode',
+  });
+  if (!withSigning) {
+    return;
+  }
+  if (withSigning === 'Sign Build') {
+    await runSigningWizard();
+  }
+  const buildTask = variant === 'Release' ? `:${moduleName}:assembleRelease` : `:${moduleName}:assembleDebug`;
+  const buildResult = await runGradleTaskWithResult(workspaceRoot, buildTask);
+  showGradleOutput(buildTask, buildResult, workspaceRoot);
+  if (buildResult.exitCode !== 0) {
+    showError('Build failed.');
+    return;
+  }
+  const installChoice = await vscode.window.showQuickPick(['Install/Test on device', 'Skip install'], { placeHolder: 'Next step' });
+  if (installChoice === 'Install/Test on device') {
+    const installTask = variant === 'Release' ? `:${moduleName}:installRelease` : `:${moduleName}:installDebug`;
+    const installResult = await runGradleTaskWithResult(workspaceRoot, installTask);
+    showGradleOutput(installTask, installResult, workspaceRoot);
+    if (installResult.exitCode !== 0) {
+      showError('Install step failed.');
+      return;
+    }
+  }
+  showInfo(`Release flow completed for ${moduleName} (${variant}).`);
+}

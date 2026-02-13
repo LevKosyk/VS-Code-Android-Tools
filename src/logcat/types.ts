@@ -39,6 +39,7 @@ export interface LogEntry {
 export interface LogFilter {
   minLevel: LogLevel;
   packageName?: string;
+  pid?: number;
   tag?: string;
   search?: string;
 }
@@ -73,6 +74,9 @@ export function parseLogLine(line: string, id: number): LogEntry | null {
 }
 export function matchesFilter(entry: LogEntry, filter: LogFilter): boolean {
   if (LOG_LEVEL_PRIORITY[entry.level] < LOG_LEVEL_PRIORITY[filter.minLevel]) {
+    return false;
+  }
+  if (typeof filter.pid === 'number' && entry.pid !== filter.pid) {
     return false;
   }
   if (filter.tag && !entry.tag.toLowerCase().includes(filter.tag.toLowerCase())) {

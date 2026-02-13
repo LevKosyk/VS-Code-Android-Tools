@@ -5,6 +5,7 @@ import { AndroidProjectProvider } from './projectTreeProvider';
 import { ProjectTreeItem } from './projectTreeItem';
 import { CATEGORY_CONFIGS, CategoryId } from './types';
 import { showError, showInfo, showWarning } from '../ui/notifications';
+import { pushUndoEntry, undoLastEntry } from './undoManager';
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -44,6 +45,24 @@ function getTargetDirectory(item?: ProjectTreeItem): string | undefined {
   return workspaceRoot;
 }
 
+function getTrashRoot(workspaceRoot: string): string {
+  return path.join(workspaceRoot, '.android-tools-trash');
+}
+
+async function getUniquePath(targetPath: string): Promise<string> {
+  const parsed = path.parse(targetPath);
+  let attempt = 0;
+  while (attempt < 200) {
+    const suffix = attempt === 0 ? '' : `-${attempt}`;
+    const candidate = path.join(parsed.dir, `${parsed.name}${suffix}${parsed.ext}`);
+    if (!fs.existsSync(candidate)) {
+      return candidate;
+    }
+    attempt++;
+  }
+  return path.join(parsed.dir, `${parsed.name}-${Date.now()}${parsed.ext}`);
+}
+
 export async function createFolderCommand(
   item: ProjectTreeItem | undefined,
   provider: AndroidProjectProvider
@@ -54,7 +73,7 @@ export async function createFolderCommand(
     return;
   }
   const folderName = await vscode.window.showInputBox({
-    title: 'Create Folder',
+    title: 'Create Folder (Inline)',
     prompt: 'Enter folder name',
     validateInput: (value) => {
       if (!value || value.trim().length === 0) {
@@ -95,7 +114,7 @@ export async function createFileCommand(
     return;
   }
   const fileName = await vscode.window.showInputBox({
-    title: 'Create File',
+    title: 'Create File (Inline)',
     prompt: 'Enter file name (with extension)',
     validateInput: (value) => {
       if (!value || value.trim().length === 0) {
@@ -140,7 +159,7 @@ export async function renameItemCommand(
   const currentPath = item.data.resourceUri.fsPath;
   const currentName = path.basename(currentPath);
   const newName = await vscode.window.showInputBox({
-    title: 'Rename',
+    title: 'Rename (Inline)',
     value: currentName,
     validateInput: (value) => {
       if (!value || value.trim().length === 0) {
@@ -184,24 +203,43 @@ export async function deleteItemCommand(
     return;
   }
   const targetPath = item.data.resourceUri.fsPath;
-  const confirm = await vscode.window.showWarningMessage(
-    `Delete "${path.basename(targetPath)}"?`,
-    { modal: true },
-    'Delete'
-  );
-  if (confirm !== 'Delete') {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
     return;
   }
   try {
-    await vscode.workspace.fs.delete(item.data.resourceUri, {
-      recursive: true,
-      useTrash: true,
+    const trashRoot = getTrashRoot(workspaceRoot);
+    const rel = path.relative(workspaceRoot, targetPath);
+    const trashTarget = await getUniquePath(path.join(trashRoot, rel));
+    await fs.promises.mkdir(path.dirname(trashTarget), { recursive: true });
+    await vscode.workspace.fs.rename(item.data.resourceUri, vscode.Uri.file(trashTarget), { overwrite: false });
+    pushUndoEntry({
+      label: `Delete ${path.basename(targetPath)}`,
+      items: [{ from: trashTarget, to: targetPath }],
     });
     provider.refresh();
-    showInfo('Deleted');
+    const action = await vscode.window.showInformationMessage('Moved to Android Tools Trash.', 'Restore');
+    if (action === 'Restore') {
+      await undoLastProjectAction(provider);
+    }
   } catch (error) {
     showError(
       `Failed to delete: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
+  }
+}
+
+export async function undoLastProjectAction(provider: AndroidProjectProvider): Promise<void> {
+  try {
+    const entry = await undoLastEntry();
+    if (!entry) {
+      showWarning('Nothing to undo.');
+      return;
+    }
+    provider.refresh();
+    showInfo(`Undo complete: ${entry.label}`);
+  } catch (error) {
+    showError(`Undo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

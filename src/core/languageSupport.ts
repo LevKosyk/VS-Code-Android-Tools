@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { execCommand } from './cli';
+import { parseJavaMajorVersion, parseJavaVersionLabel } from './javaVersion';
 interface RequiredExtension {
   id: string;
   name: string;
@@ -21,23 +22,6 @@ const REQUIRED_EXTENSIONS: Record<string, RequiredExtension> = {
     url: 'https://marketplace.visualstudio.com/items?itemName=fwcd.kotlin'
   }
 };
-function parseJavaMajorVersion(output: string): number | undefined {
-  const versionMatch = output.match(/version\s+"([^"]+)"/i);
-  const raw = versionMatch ? versionMatch[1] : output.trim();
-  const parts = raw.split(/[._-]/).filter(Boolean);
-  if (parts.length === 0) {
-    return undefined;
-  }
-  const first = parseInt(parts[0], 10);
-  if (Number.isNaN(first)) {
-    return undefined;
-  }
-  if (first === 1 && parts.length > 1) {
-    const legacy = parseInt(parts[1], 10);
-    return Number.isNaN(legacy) ? undefined : legacy;
-  }
-  return first;
-}
 async function getJavaMajorVersion(): Promise<number | undefined> {
   try {
     const result = await execCommand('java', ['-version'], { timeout: 5000 });
@@ -45,6 +29,18 @@ async function getJavaMajorVersion(): Promise<number | undefined> {
     return parseJavaMajorVersion(combined);
   } catch {
     return undefined;
+  }
+}
+async function getJavaVersionDetails(): Promise<{ major?: number; label?: string }> {
+  try {
+    const result = await execCommand('java', ['-version'], { timeout: 5000 });
+    const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
+    return {
+      major: parseJavaMajorVersion(combined),
+      label: parseJavaVersionLabel(combined),
+    };
+  } catch {
+    return {};
   }
 }
 async function activateIfInstalled(extId: string): Promise<void> {
@@ -74,10 +70,13 @@ export async function checkLanguageExtensions(context?: vscode.ExtensionContext)
       const now = Date.now();
       const lastShown = contextStore?.get<number>(JAVA25_NOTICE_KEY) || 0;
       if (now - lastShown > NOTICE_COOLDOWN_MS) {
-        vscode.window.setStatusBarMessage(
-          'Android Tools: Kotlin extension may fail on Java 25. Use JDK 21 if needed.',
-          8000
+        const action = await vscode.window.showWarningMessage(
+          'Android Tools: Kotlin extension may fail on Java 25+. Use JDK 21 for better stability.',
+          'Use JDK 21 path'
         );
+        if (action === 'Use JDK 21 path') {
+          await vscode.commands.executeCommand('android-toolkit.setJdk21Path');
+        }
         await contextStore?.update(JAVA25_NOTICE_KEY, now);
       }
     } else {
@@ -107,4 +106,43 @@ export async function ensureLanguageMode(document: vscode.TextDocument): Promise
       await activateIfInstalled(REQUIRED_EXTENSIONS.kotlin.id);
     }
   }
+}
+
+export async function setJdk21Path(): Promise<boolean> {
+  const selected = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Use this JDK',
+    title: 'Select JDK 21 Home',
+  });
+  if (!selected?.[0]) {
+    return false;
+  }
+  const jdkPath = selected[0].fsPath;
+  await vscode.workspace.getConfiguration().update('java.jdt.ls.java.home', jdkPath, vscode.ConfigurationTarget.Global);
+  await vscode.workspace.getConfiguration().update('kotlin.languageServer.enabled', true, vscode.ConfigurationTarget.Global);
+  vscode.window.setStatusBarMessage('Android Tools: JDK path updated. Reload window to apply.', 8000);
+  return true;
+}
+
+export interface LanguageHealthStatus {
+  javaMajor?: number;
+  javaVersion?: string;
+  hasJavaExtension: boolean;
+  hasKotlinExtension: boolean;
+  kotlinRiskOnJava25: boolean;
+}
+
+export async function getLanguageHealthStatus(): Promise<LanguageHealthStatus> {
+  const javaExt = vscode.extensions.getExtension(REQUIRED_EXTENSIONS.java.id);
+  const kotlinExt = vscode.extensions.getExtension(REQUIRED_EXTENSIONS.kotlin.id);
+  const java = await getJavaVersionDetails();
+  return {
+    javaMajor: java.major,
+    javaVersion: java.label,
+    hasJavaExtension: Boolean(javaExt),
+    hasKotlinExtension: Boolean(kotlinExt),
+    kotlinRiskOnJava25: Boolean(kotlinExt && java.major && java.major >= 25),
+  };
 }

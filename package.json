@@ -1,19 +1,35 @@
 {
   "name": "vscode-android-tools",
   "displayName": "VS Code Android Tools",
-  "description": "Fast, lightweight Android device and emulator management using CLI tools",
-  "version": "0.1.6",
+  "description": "Run, debug, and manage Android apps in VS Code with a focused Android toolkit",
+  "version": "0.2.0",
   "publisher": "levkosyk",
+  "license": "MIT",
   "icon": "assets/logo/logo.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/android-tools/vscode-android-tools"
+    "url": "https://github.com/LevKosyk/Android-Tools"
+  },
+  "homepage": "https://github.com/LevKosyk/Android-Tools#readme",
+  "bugs": {
+    "url": "https://github.com/LevKosyk/Android-Tools/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Debuggers"
+  ],
+  "keywords": [
+    "android",
+    "adb",
+    "emulator",
+    "gradle",
+    "logcat",
+    "kotlin",
+    "java",
+    "apk"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -60,6 +76,12 @@
           "name": "Gradle Tasks",
           "icon": "$(tools)",
           "contextualTitle": "Gradle Tasks"
+        },
+        {
+          "id": "androidProblemsView",
+          "name": "Problems",
+          "icon": "$(error)",
+          "contextualTitle": "Android Problems"
         }
       ]
     },
@@ -175,9 +197,17 @@
         "title": "Android: Delete"
       },
       {
+        "command": "android-toolkit.undoLastProjectAction",
+        "title": "Android: Undo Last Project Action"
+      },
+      {
         "command": "android-toolkit.createProject",
         "title": "Android: New Project",
         "icon": "$(rocket)"
+      },
+      {
+        "command": "android-toolkit.setJdk21Path",
+        "title": "Android: Use JDK 21 Path"
       },
       {
         "command": "android-toolkit.runAppOnEmulator",
@@ -193,6 +223,34 @@
         "command": "android-toolkit.openRunPanel",
         "title": "Android: Open Run Panel",
         "icon": "$(play)"
+      },
+      {
+        "command": "android-toolkit.firstRunHealthWizard",
+        "title": "Android: First-Run Health Wizard"
+      },
+      {
+        "command": "android-toolkit.runSelectedAlias",
+        "title": "Android: Run Selected (Quick)"
+      },
+      {
+        "command": "android-toolkit.stopSelectedAlias",
+        "title": "Android: Stop Selected (Quick)"
+      },
+      {
+        "command": "android-toolkit.logcatThisApp",
+        "title": "Android: Logcat This App (Quick)"
+      },
+      {
+        "command": "android-toolkit.cancelActiveOperation",
+        "title": "Android: Cancel Active Operation"
+      },
+      {
+        "command": "android-toolkit.collectDiagnosticsSnapshot",
+        "title": "Android: Collect Diagnostics Snapshot"
+      },
+      {
+        "command": "android-toolkit.openRunFailureReport",
+        "title": "Android: Open Run Failure Report"
       },
       {
         "command": "android-toolkit.selectBuildVariant",
@@ -214,6 +272,19 @@
         "command": "android-toolkit.refreshGradleTasks",
         "title": "Android: Refresh Gradle Tasks",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.clearProblems",
+        "title": "Android: Clear Problems",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "android-toolkit.problemApplyFix",
+        "title": "Android: Apply Problem Fix"
+      },
+      {
+        "command": "android-toolkit.problemOpenLocation",
+        "title": "Android: Open Problem Location"
       },
       {
         "command": "android-toolkit.runGradleTask",
@@ -258,6 +329,10 @@
         "title": "Android: Signing Wizard"
       },
       {
+        "command": "android-toolkit.releaseFlow",
+        "title": "Android: Release Flow Wizard"
+      },
+      {
         "command": "android-toolkit.buildSignedApk",
         "title": "Android: Build Signed APK"
       },
@@ -294,6 +369,35 @@
         "command": "android-toolkit.openLayoutPreview",
         "title": "Android: Preview Layout",
         "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.openXmlLivePreview",
+        "title": "Android: Open XML Live Preview",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "android-toolkit.toggleXmlLivePreview",
+        "title": "Android: Toggle XML Live Preview"
+      },
+      {
+        "command": "android-toolkit.generateConstraintSetSnippet",
+        "title": "Android: Generate ConstraintSet Snippet from Selection"
+      },
+      {
+        "command": "android-toolkit.lintCurrentLayoutXml",
+        "title": "Android: Lint Current Layout XML"
+      },
+      {
+        "command": "android-toolkit.extractStringResourceFromXml",
+        "title": "Android: Extract String Resource from XML"
+      },
+      {
+        "command": "android-toolkit.extractAllHardcodedStringsFromLayout",
+        "title": "Android: Extract All Hardcoded Strings (Layout)"
+      },
+      {
+        "command": "android-toolkit.fixAllLayoutWarnings",
+        "title": "Android: Fix All Layout Warnings"
       },
       {
         "command": "android-toolkit.openLayoutEditor",
@@ -595,6 +699,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "android-toolkit.undoLastProjectAction",
+          "when": "view == androidProjectView",
+          "group": "navigation@3"
+        },
+        {
           "command": "android-toolkit.refreshDeviceManager",
           "when": "view == deviceManagerView",
           "group": "navigation@2"
@@ -617,6 +726,11 @@
         {
           "command": "android-toolkit.refreshGradleTasks",
           "when": "view == androidToolkitGradleTasksView",
+          "group": "navigation"
+        },
+        {
+          "command": "android-toolkit.clearProblems",
+          "when": "view == androidProblemsView",
           "group": "navigation"
         }
       ],
@@ -690,9 +804,63 @@
           "command": "android-toolkit.deviceExplorer.delete",
           "when": "view == deviceFileExplorerView && (viewItem == file || viewItem == folder)",
           "group": "navigation@3"
+        },
+        {
+          "command": "android-toolkit.problemApplyFix",
+          "when": "view == androidProblemsView && viewItem == android-problem-fix",
+          "group": "navigation@1"
+        },
+        {
+          "command": "android-toolkit.problemOpenLocation",
+          "when": "view == androidProblemsView && viewItem == android-problem-location",
+          "group": "navigation@2"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "android-toolkit.runSelectedAlias",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus || terminalFocus || view == androidProjectView"
+      },
+      {
+        "command": "android-toolkit.stopSelectedAlias",
+        "key": "ctrl+alt+shift+r",
+        "mac": "cmd+alt+shift+r",
+        "when": "editorTextFocus || terminalFocus || view == androidProjectView"
+      },
+      {
+        "command": "android-toolkit.logcatThisApp",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "editorTextFocus || terminalFocus || view == androidProjectView"
+      },
+      {
+        "command": "android-toolkit.openXmlLivePreview",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "editorTextFocus && editorLangId == xml"
+      },
+      {
+        "command": "android-toolkit.toggleXmlLivePreview",
+        "key": "ctrl+alt+shift+p",
+        "mac": "cmd+alt+shift+p",
+        "when": "editorTextFocus && editorLangId == xml"
+      },
+      {
+        "command": "android-toolkit.generateConstraintSetSnippet",
+        "key": "ctrl+alt+shift+c",
+        "mac": "cmd+alt+shift+c",
+        "when": "editorTextFocus && editorLangId == xml"
+      },
+      {
+        "command": "android-toolkit.extractStringResourceFromXml",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e",
+        "when": "editorTextFocus && editorLangId == xml"
+      }
+    ],
     "configuration": {
       "title": "Android Tools",
       "properties": {
@@ -704,6 +872,27 @@
           ],
           "default": "quiet",
           "markdownDescription": "Controls Android Tools notification behavior. `quiet` minimizes pop-ups (status bar + output for info/warn). `normal` still reduces noise (info stays in status bar; warnings/errors are throttled)."
+        },
+        "androidToolkit.performance.deferBackgroundMonitoring": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Defer background emulator/device monitoring during activation to improve startup performance."
+        },
+        "androidToolkit.sync.autoSync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Automatically refresh device/emulator-related views when connected devices state changes."
+        },
+        "androidToolkit.sync.autoSync.intervalMs": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 1500,
+          "markdownDescription": "Polling interval for auto-sync checks (milliseconds). Lower values refresh faster but use more resources."
+        },
+        "androidToolkit.xml.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run lightweight layout XML lint checks when saving `res/layout/*.xml` files."
         }
       }
     }
@@ -712,9 +901,15 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test": "npm run compile && node --test test/**/*.test.js",
+    "test:p0": "npm run compile && node --test test/p0-run-scenarios-smoke.test.js test/commands-smoke.test.js",
+    "test:runtime": "npm run compile && node test/vscode/runTest.js",
+    "release:check": "npm run compile && npm run lint && npm test --silent && npm run test:p0",
+    "release:package": "npm run release:check && npx --yes @vscode/vsce package --no-yarn"
   },
   "devDependencies": {
+    "@vscode/test-electron": "^2.5.2",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",

@@ -16,6 +16,8 @@ import {
   DiscoveredFile 
 } from './projectScanner';
 import { showError, showInfo, showWarning } from '../ui/notifications';
+import { pushUndoEntry } from './undoManager';
+import { measureAsync } from '../core/perf';
 export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTreeItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<ProjectTreeItem | undefined | null>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -58,36 +60,38 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
     return element;
   }
   async getChildren(element?: ProjectTreeItem): Promise<ProjectTreeItem[]> {
-    if (!this.workspaceRoot) {
-      return [this.createNoWorkspaceItem()];
-    }
-    if (!this.isAndroid) {
-      return [this.createNotAndroidItem()];
-    }
-    if (!element) {
-      return this.getRootChildren();
-    }
-    if (element.data.type === 'root') {
-      return this.getCategoryNodes();
-    }
-    if (element.data.type === 'category' && element.data.categoryId) {
-      const key = `category:${element.data.categoryId}`;
-      return this.getCachedChildren(key, () => this.getCategoryChildren(element.data.categoryId!));
-    }
-    if (element.data.type === 'package') {
-      if (element.children && element.children.length > 0) {
-        return element.children;
+    return measureAsync('projectTree:getChildren', async () => {
+      if (!this.workspaceRoot) {
+        return [this.createNoWorkspaceItem()];
       }
-      if (element.data.resourceUri) {
-        const key = `package:${element.data.resourceUri.fsPath}`;
+      if (!this.isAndroid) {
+        return [this.createNotAndroidItem()];
+      }
+      if (!element) {
+        return this.getRootChildren();
+      }
+      if (element.data.type === 'root') {
+        return this.getCategoryNodes();
+      }
+      if (element.data.type === 'category' && element.data.categoryId) {
+        const key = `category:${element.data.categoryId}`;
+        return this.getCachedChildren(key, () => this.getCategoryChildren(element.data.categoryId!));
+      }
+      if (element.data.type === 'package') {
+        if (element.children && element.children.length > 0) {
+          return element.children;
+        }
+        if (element.data.resourceUri) {
+          const key = `package:${element.data.resourceUri.fsPath}`;
+          return this.getCachedChildren(key, () => this.getFolderChildren(element.data.resourceUri!));
+        }
+      }
+      if (element.data.type === 'folder' && element.data.resourceUri) {
+        const key = `folder:${element.data.resourceUri.fsPath}`;
         return this.getCachedChildren(key, () => this.getFolderChildren(element.data.resourceUri!));
       }
-    }
-    if (element.data.type === 'folder' && element.data.resourceUri) {
-      const key = `folder:${element.data.resourceUri.fsPath}`;
-      return this.getCachedChildren(key, () => this.getFolderChildren(element.data.resourceUri!));
-    }
-    return [];
+      return [];
+    });
   }
   private async getCachedChildren(
     key: string,
@@ -121,26 +125,28 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
     return CATEGORY_CONFIGS.map(config => createCategoryNode(config.id));
   }
   private async getCategoryChildren(categoryId: CategoryId): Promise<ProjectTreeItem[]> {
-    if (!this.workspaceRoot) {
-      return [];
-    }
-    const config = CATEGORY_CONFIGS.find(c => c.id === categoryId);
-    if (!config) {
-      return [];
-    }
-    const result = await scanCategory(this.workspaceRoot, config);
-    if (result.files.length === 0) {
-      return [this.createEmptyItem(`No ${config.label.toLowerCase()} found`)];
-    }
-    if (categoryId === 'res') {
-      return this.groupByDirectory(result.files, result.rootPath);
-    }
-    if (categoryId === 'java') {
-      return this.buildPackageTree(result.files, result.rootPath);
-    }
-    return result.files.map(file => 
-      createFileNode(file.uri, file.name, file.isDirectory)
-    );
+    return measureAsync(`projectTree:getCategoryChildren:${categoryId}`, async () => {
+      if (!this.workspaceRoot) {
+        return [];
+      }
+      const config = CATEGORY_CONFIGS.find(c => c.id === categoryId);
+      if (!config) {
+        return [];
+      }
+      const result = await scanCategory(this.workspaceRoot, config);
+      if (result.files.length === 0) {
+        return [this.createEmptyItem(`No ${config.label.toLowerCase()} found`)];
+      }
+      if (categoryId === 'res') {
+        return this.groupByDirectory(result.files, result.rootPath);
+      }
+      if (categoryId === 'java') {
+        return this.buildPackageTree(result.files, result.rootPath);
+      }
+      return result.files.map(file =>
+        createFileNode(file.uri, file.name, file.isDirectory)
+      );
+    });
   }
   private async buildPackageTree(
     files: DiscoveredFile[],
@@ -233,25 +239,27 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
     return [...dirNodes, ...rootFiles];
   }
   private async getFolderChildren(uri: vscode.Uri): Promise<ProjectTreeItem[]> {
-    const fs = await import('fs').then(m => m.promises);
-    try {
-      const entries = await fs.readdir(uri.fsPath, { withFileTypes: true });
-      return entries
-        .filter(entry => !entry.name.startsWith('.'))
-        .sort((a, b) => {
-          if (a.isDirectory() !== b.isDirectory()) {
-            return a.isDirectory() ? -1 : 1;
-          }
-          return a.name.localeCompare(b.name);
-        })
-        .map(entry => createFileNode(
-          vscode.Uri.file(path.join(uri.fsPath, entry.name)),
-          entry.name,
-          entry.isDirectory()
-        ));
-    } catch {
-      return [];
-    }
+    return measureAsync('projectTree:getFolderChildren', async () => {
+      const fs = await import('fs').then(m => m.promises);
+      try {
+        const entries = await fs.readdir(uri.fsPath, { withFileTypes: true });
+        return entries
+          .filter(entry => !entry.name.startsWith('.'))
+          .sort((a, b) => {
+            if (a.isDirectory() !== b.isDirectory()) {
+              return a.isDirectory() ? -1 : 1;
+            }
+            return a.name.localeCompare(b.name);
+          })
+          .map(entry => createFileNode(
+            vscode.Uri.file(path.join(uri.fsPath, entry.name)),
+            entry.name,
+            entry.isDirectory()
+          ));
+      } catch {
+        return [];
+      }
+    });
   }
   private createNoWorkspaceItem(): ProjectTreeItem {
     return new ProjectTreeItem(
@@ -321,6 +329,7 @@ class AndroidProjectDragAndDropController implements vscode.TreeDragAndDropContr
       return;
     }
     const results: string[] = [];
+    const successfulMoves: Array<{ src: string; dest: string }> = [];
     const failures: string[] = [];
     const skipped: string[] = [];
     const plannedMoves: Array<{ src: string; dest: string; baseName: string }> = [];
@@ -351,8 +360,7 @@ class AndroidProjectDragAndDropController implements vscode.TreeDragAndDropContr
     }
     const previewText = this.buildMovePreviewText(workspaceRoot, plannedMoves);
     const confirm = await vscode.window.showWarningMessage(
-      `Move ${plannedMoves.length} item(s)?\n${previewText}`,
-      { modal: true },
+      `Drag&Drop preview:\n${previewText}`,
       'Move'
     );
     if (confirm !== 'Move') {
@@ -367,12 +375,22 @@ class AndroidProjectDragAndDropController implements vscode.TreeDragAndDropContr
           { overwrite: false }
         );
         results.push(`${move.baseName} -> ${path.relative(workspaceRoot, move.dest)}`);
+        successfulMoves.push({ src: move.src, dest: move.dest });
       } catch (error) {
         failures.push(`${move.baseName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
     if (results.length > 0) {
-      showInfo(`Moved ${results.length} item(s)`);
+      pushUndoEntry({
+        label: `Move ${results.length} item(s)`,
+        items: successfulMoves.map(move => ({ from: move.dest, to: move.src })),
+      });
+    }
+    if (results.length > 0) {
+      const action = await vscode.window.showInformationMessage(`Moved ${results.length} item(s)`, 'Undo');
+      if (action === 'Undo') {
+        await vscode.commands.executeCommand('android-toolkit.undoLastProjectAction');
+      }
     }
     if (skipped.length > 0) {
       showWarning(`Skipped ${skipped.length} item(s): ${skipped.slice(0, 2).join(', ')}`);

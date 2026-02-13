@@ -13,3 +13,7 @@ node_modules/**
 **/*.test.ts
 **/*.spec.ts
 .github/**
+test/**
+assets/gifs/**
+assets/gifs/.tmp/**
+*.vsix
