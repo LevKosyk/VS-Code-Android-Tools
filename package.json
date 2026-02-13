@@ -902,7 +902,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "npm run compile && node --test test/**/*.test.js",
+    "test": "npm run compile && node test/run-node-tests.js",
     "test:p0": "npm run compile && node --test test/p0-run-scenarios-smoke.test.js test/commands-smoke.test.js",
     "test:runtime": "npm run compile && node test/vscode/runTest.js",
     "release:check": "npm run compile && npm run lint && npm test --silent && npm run test:p0",
