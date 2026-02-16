@@ -35,6 +35,15 @@ async function writeFile(filePath: string, content: string): Promise<void> {
 }
 
 export async function createAndroidProjectWizard(): Promise<void> {
+  return createAndroidProjectWizardWithOptions();
+}
+
+export interface ProjectWizardOptions {
+  templateValue?: 'views-empty' | 'views-bottom-nav' | 'compose-empty';
+  languageValue?: 'kotlin' | 'java';
+}
+
+export async function createAndroidProjectWizardWithOptions(options: ProjectWizardOptions = {}): Promise<void> {
   const targetDirPick = await vscode.window.showOpenDialog({
     canSelectFiles: false,
     canSelectFolders: true,
@@ -84,22 +93,28 @@ export async function createAndroidProjectWizard(): Promise<void> {
   if (!packageName) {
     return;
   }
-  const templatePick = await vscode.window.showQuickPick(
-    [
-      { label: 'Views: Empty Activity', value: 'views-empty' },
-      { label: 'Views: Bottom Navigation', value: 'views-bottom-nav' },
-      { label: 'Compose: Empty Activity', value: 'compose-empty' },
-    ],
+  const templateOptions = [
+    { label: 'Views: Empty Activity', value: 'views-empty' as const },
+    { label: 'Views: Bottom Navigation', value: 'views-bottom-nav' as const },
+    { label: 'Compose: Empty Activity', value: 'compose-empty' as const },
+  ];
+  const templatePick = options.templateValue
+    ? templateOptions.find(t => t.value === options.templateValue)
+    : await vscode.window.showQuickPick(
+    templateOptions,
     { title: 'New Android Project (4/6)', placeHolder: 'Select project template' }
   );
   if (!templatePick) {
     return;
   }
-  const languagePick = await vscode.window.showQuickPick(
-    [
-      { label: 'Kotlin', value: 'kotlin' },
-      { label: 'Java', value: 'java' },
-    ],
+  const languageOptions = [
+    { label: 'Kotlin', value: 'kotlin' as const },
+    { label: 'Java', value: 'java' as const },
+  ];
+  const languagePick = options.languageValue
+    ? languageOptions.find(l => l.value === options.languageValue)
+    : await vscode.window.showQuickPick(
+    languageOptions,
     {
       title: 'New Android Project (5/6)',
       placeHolder: templatePick.value === 'compose-empty'

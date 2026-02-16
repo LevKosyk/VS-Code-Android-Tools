@@ -3,6 +3,7 @@ import { detectSdk, isBuildToolsInstalled, isSdkAvailable } from './core/sdkDete
 import { AndroidToolsError } from './core/errors';
 import { checkLanguageExtensions, ensureLanguageMode, getLanguageHealthStatus, setJdk21Path } from './core/languageSupport';
 import { listDevicesDetailed, listRunningEmulators } from './devices/deviceManager';
+import { AndroidDevice } from './devices/types';
 import { listAvds, startEmulator, stopEmulatorByName } from './emulators/emulatorManager';
 import { listSystemImages, listDeviceProfiles, createAvd } from './emulators/avdCreator';
 import { AndroidProjectProvider } from './projectView/projectTreeProvider';
@@ -20,7 +21,7 @@ import {
   deleteItemCommand,
   undoLastProjectAction,
 } from './projectView/fileActions';
-import { createAndroidProjectWizard } from './projectView/projectCreator';
+import { createAndroidProjectWizard, createAndroidProjectWizardWithOptions } from './projectView/projectCreator';
 import { EmulatorControlProvider } from './emulatorControl/emulatorControlProvider';
 import { EmulatorControlPanel } from './emulatorControl/emulatorPanel';
 import {
@@ -50,6 +51,7 @@ import {
   showInfo, 
   showWarning,
   showError, 
+  showActionableError,
   showToolkitError, 
   withProgress 
 } from './ui/notifications';
@@ -102,9 +104,20 @@ import { runDependencyInsight } from './gradle/dependencyInsight';
 import { issueToMultiline, runGuarded, ToolkitIssue } from './core/stability';
 import { operationManager } from './core/operations';
 import { execCommand } from './core/cli';
+import { logPerf } from './core/perf';
+import { BackgroundScheduler } from './core/backgroundScheduler';
+import { StartupProfilerEntry, StartupProfilerPanel } from './ui/startupProfilerPanel';
+import { readProjectConfig } from './team/projectConfigStore';
 import { AndroidProblemsProvider, AndroidProblemTreeItem } from './problems/problemsProvider';
 import { buildRunFailureReport, classifyGradleFailure, GradleFailureTag, RunFailureRecord } from './run/runDiagnostics';
 import { pickSmartDeviceId } from './run/smartDevice';
+import { ERROR_REASON_META, normalizeErrorReason } from './run/errorTaxonomy';
+import type { OnboardingCheck } from './ui/onboardingPanel';
+import { FailureInsightsPanel, RunFixAttemptRecord, summarizeFailureInsights } from './insights/failureInsightsPanel';
+import { exportTeamConfig, importTeamConfig } from './team/teamSettings';
+import { SloDashboardPanel } from './insights/sloDashboardPanel';
+import { RunActionMetric, SessionRecord, summarizeSlo } from './insights/sloSummary';
+import { CommandLatencyRecord, summarizeCommandBudgets } from './insights/commandBudget';
 let extensionContext: vscode.ExtensionContext | undefined;
 let lastGradleErrorSummary: string | undefined;
 let lastGradleErrorLocation: { file: string; line: number; column?: number } | undefined;
@@ -127,8 +140,18 @@ interface RunConfiguration {
 const RUN_CONFIGS_KEY = 'runConfigurations';
 const RUN_HISTORY_KEY = 'runHistory';
 const RUN_DEVICE_PREFS_KEY = 'runDevicePrefs';
+const RUN_FAILURE_RECORDS_KEY = 'runFailureRecords';
+const RUN_FIX_ATTEMPTS_KEY = 'runFixAttempts';
+const RUN_ACTION_METRICS_KEY = 'runActionMetrics';
+const COMMAND_LATENCY_METRICS_KEY = 'commandLatencyMetrics';
+const SESSION_HISTORY_KEY = 'sessionHistory';
+const ACTIVE_SESSION_KEY = 'activeSession';
 const RUN_PANEL_SCOPE = 'run-panel-ops';
-const FIRST_RUN_WIZARD_DONE_KEY = 'androidTools.firstRunWizard.done';
+const FIRST_RUN_WIZARD_SEEN_KEY = 'androidTools.firstRunWizard.seen';
+const FIRST_RUN_WIZARD_SUCCESS_KEY = 'androidTools.firstRunWizard.success';
+const STARTUP_PROFILER_ENTRIES_KEY = 'startupProfilerEntries';
+const STARTUP_PROFILER_TOTAL_KEY = 'startupProfilerTotalMs';
+const ACTION_REPLAY_KEY = 'actionReplay';
 function lazyLoad<T>(modulePath: string): T {
   return require(modulePath) as T;
 }
@@ -153,6 +176,24 @@ interface RunActionResult {
   errorLocation?: { file: string; line: number; column?: number };
 }
 let problemsProvider: AndroidProblemsProvider | undefined;
+const runFixAttempts: RunFixAttemptRecord[] = [];
+const runActionMetrics: RunActionMetric[] = [];
+const commandLatencyMetrics: CommandLatencyRecord[] = [];
+const sessionHistory: SessionRecord[] = [];
+let currentSessionId = '';
+const startupProfilerEntries: StartupProfilerEntry[] = [];
+let startupProfilerTotalMs = 0;
+const backgroundScheduler = new BackgroundScheduler();
+interface ActionReplayRecord {
+  action: string;
+  args: string;
+  durationMs: number;
+  success: boolean;
+  timestamp: number;
+  error?: string;
+}
+const actionReplay: ActionReplayRecord[] = [];
+const policyWarningsShown = new Set<string>();
 
 function reportRunProblem(
   action: string,
@@ -172,7 +213,7 @@ function reportRunProblem(
     location: result.errorLocation,
     fixes: result.fixSuggestions,
   });
-  const reason = lastGradleErrorTags[0] || 'unknown';
+  const reason = normalizeErrorReason(lastGradleErrorTags[0]);
   runFailureRecords.unshift({
     action,
     message: result.message,
@@ -182,6 +223,8 @@ function reportRunProblem(
   if (runFailureRecords.length > 200) {
     runFailureRecords.length = 200;
   }
+  markSessionFailure();
+  void persistRunFailureRecords();
 }
 function issueToRunResult(issue: ToolkitIssue, fallbackMessage: string, fixes: RunFixSuggestion[] = []): RunActionResult {
   return {
@@ -195,7 +238,23 @@ function handleError(error: unknown): void {
   if (error instanceof AndroidToolsError) {
     showToolkitError(error);
   } else if (error instanceof Error) {
-    showError(error.message);
+    void showActionableError({
+      title: error.message,
+      suggestions: [
+        'Open "Android: Open Run Failure Report" for diagnostics.',
+        'Open "Android: Open Action Replay Report" to attach reproduce steps.',
+      ],
+      actions: [
+        {
+          label: 'Run Failure Report',
+          action: async () => vscode.commands.executeCommand('android-toolkit.openRunFailureReport'),
+        },
+        {
+          label: 'Action Replay',
+          action: async () => vscode.commands.executeCommand('android-toolkit.openActionReplayReport'),
+        },
+      ],
+    });
   } else {
     showError('An unexpected error occurred.');
   }
@@ -223,6 +282,121 @@ async function saveRunHistory(entries: RunHistoryEntry[]): Promise<void> {
     return;
   }
   await extensionContext.globalState.update(RUN_HISTORY_KEY, entries);
+}
+async function persistRunFailureRecords(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(RUN_FAILURE_RECORDS_KEY, runFailureRecords.slice(0, 500));
+}
+async function persistRunFixAttempts(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(RUN_FIX_ATTEMPTS_KEY, runFixAttempts.slice(0, 500));
+}
+async function persistRunActionMetrics(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(RUN_ACTION_METRICS_KEY, runActionMetrics.slice(0, 1000));
+}
+async function persistCommandLatencyMetrics(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(COMMAND_LATENCY_METRICS_KEY, commandLatencyMetrics.slice(0, 1000));
+}
+async function persistSessionHistory(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(SESSION_HISTORY_KEY, sessionHistory.slice(0, 300));
+}
+function trackActionMetric(action: string, result: RunActionResult, durationMs: number): void {
+  if (!['Run', 'Build', 'Install'].includes(action) || durationMs <= 0) {
+    return;
+  }
+  runActionMetrics.unshift({
+    action,
+    success: result.success,
+    durationMs: Math.round(durationMs),
+    timestamp: Date.now(),
+  });
+  if (runActionMetrics.length > 1000) {
+    runActionMetrics.length = 1000;
+  }
+  void persistRunActionMetrics();
+}
+function markSessionFailure(): void {
+  if (!currentSessionId) {
+    return;
+  }
+  const active = sessionHistory.find(s => s.id === currentSessionId);
+  if (!active) {
+    return;
+  }
+  if (!active.hadFailure) {
+    active.hadFailure = true;
+    void persistSessionHistory();
+    void extensionContext?.globalState.update(ACTIVE_SESSION_KEY, active);
+  }
+}
+async function withCommandBudget<T>(commandId: string, action: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  let success = false;
+  try {
+    const value = await action();
+    success = true;
+    return value;
+  } finally {
+    commandLatencyMetrics.unshift({
+      commandId,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      success,
+      timestamp: Date.now(),
+    });
+    if (commandLatencyMetrics.length > 1000) {
+      commandLatencyMetrics.length = 1000;
+    }
+    void persistCommandLatencyMetrics();
+  }
+}
+async function startSession(context: vscode.ExtensionContext): Promise<void> {
+  const existing = context.globalState.get<SessionRecord | undefined>(ACTIVE_SESSION_KEY);
+  if (existing && !existing.endedAt) {
+    sessionHistory.unshift({
+      ...existing,
+      endedAt: Date.now(),
+      unexpectedTermination: true,
+    });
+  }
+  currentSessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const session: SessionRecord = {
+    id: currentSessionId,
+    startedAt: Date.now(),
+    hadFailure: false,
+  };
+  sessionHistory.unshift(session);
+  if (sessionHistory.length > 300) {
+    sessionHistory.length = 300;
+  }
+  await persistSessionHistory();
+  await context.globalState.update(ACTIVE_SESSION_KEY, session);
+}
+function endSession(graceful: boolean): void {
+  if (!extensionContext || !currentSessionId) {
+    return;
+  }
+  const active = sessionHistory.find(s => s.id === currentSessionId);
+  if (active) {
+    active.endedAt = Date.now();
+    if (!graceful) {
+      active.unexpectedTermination = true;
+    }
+  }
+  void persistSessionHistory();
+  void extensionContext.globalState.update(ACTIVE_SESSION_KEY, undefined);
 }
 async function appendRunHistory(entry: Omit<RunHistoryEntry, 'id' | 'timestamp' | 'label'>): Promise<void> {
   const next: RunHistoryEntry = {
@@ -271,13 +445,78 @@ type HealthWizardItem = {
   description: string;
   action?: () => Promise<void>;
 };
+function onboardingScore(checks: OnboardingCheck[]): number {
+  if (checks.length === 0) {
+    return 0;
+  }
+  const ok = checks.filter(c => c.ok).length;
+  return Math.round((ok / checks.length) * 100);
+}
 async function openFirstRunHealthWizard(force = false): Promise<void> {
   if (!extensionContext) {
     return;
   }
-  if (!force && extensionContext.globalState.get<boolean>(FIRST_RUN_WIZARD_DONE_KEY, false)) {
+  if (!force && extensionContext.globalState.get<boolean>(FIRST_RUN_WIZARD_SUCCESS_KEY, false)) {
     return;
   }
+  const checks = await getOnboardingV2Checks();
+  const score = onboardingScore(checks);
+  const failing = checks.filter(c => !c.ok);
+  if (score === 100) {
+    await extensionContext.globalState.update(FIRST_RUN_WIZARD_SEEN_KEY, true);
+    await extensionContext.globalState.update(FIRST_RUN_WIZARD_SUCCESS_KEY, true);
+    showInfo('First-run checks passed. Ready to run Android apps.');
+    return;
+  }
+  const items: HealthWizardItem[] = failing.map(c => ({
+    label: `$(warning) ${c.title}`,
+    description: c.details,
+    action: c.fixLabel ? async () => applyOnboardingV2Fix(c.id) : undefined,
+  }));
+  const quickPick = await vscode.window.showQuickPick(
+    [
+      ...items.map(i => ({
+        label: i.label,
+        description: i.description,
+        item: i,
+      })),
+      {
+        label: '$(wrench) Fix All Detected Issues',
+        description: `Current score: ${score}%`,
+        item: {
+          action: async () => {
+            for (const check of failing) {
+              await applyOnboardingV2Fix(check.id);
+            }
+          },
+        } as HealthWizardItem,
+      },
+      {
+        label: '$(checklist) Open Onboarding Panel',
+        description: 'View full checklist and run setup fixes',
+        item: { action: async () => openOnboardingV2Panel(true) } as HealthWizardItem,
+      },
+      {
+        label: '$(play) Open Run Panel',
+        description: 'Continue with current setup',
+        item: { action: async () => vscode.commands.executeCommand('android-toolkit.openRunPanel') } as HealthWizardItem,
+      },
+    ],
+    {
+      title: 'Android Tools First-Run Health Wizard',
+      placeHolder: 'Select an item to auto-fix or continue',
+      ignoreFocusOut: true,
+    }
+  );
+  if (quickPick?.item?.action) {
+    await quickPick.item.action();
+  }
+  const afterChecks = await getOnboardingV2Checks();
+  const afterScore = onboardingScore(afterChecks);
+  await extensionContext.globalState.update(FIRST_RUN_WIZARD_SEEN_KEY, true);
+  await extensionContext.globalState.update(FIRST_RUN_WIZARD_SUCCESS_KEY, afterScore === 100);
+}
+async function getOnboardingV2Checks(): Promise<OnboardingCheck[]> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const languageHealth = await getLanguageHealthStatus();
   const devices = await listDevicesDetailed();
@@ -289,56 +528,133 @@ async function openFirstRunHealthWizard(force = false): Promise<void> {
   } catch {
     sdkOk = false;
   }
-
-  const items: HealthWizardItem[] = [];
-  items.push({
-    label: sdkOk ? '$(check) Android SDK / ADB' : '$(warning) Android SDK / ADB',
-    description: sdkOk ? 'Detected' : 'Not configured',
-    action: sdkOk ? undefined : async () => {
-      await vscode.env.openExternal(vscode.Uri.parse('https://developer.android.com/studio#command-tools'));
+  const checks: OnboardingCheck[] = [
+    {
+      id: 'sdk',
+      title: 'Android SDK / ADB',
+      ok: sdkOk,
+      details: sdkOk ? 'Detected and usable.' : 'SDK tools not configured.',
+      fixLabel: sdkOk ? undefined : 'Open SDK Setup Guide',
+    },
+    {
+      id: 'jdk',
+      title: 'Java Runtime (Kotlin-safe)',
+      ok: !languageHealth.kotlinRiskOnJava25,
+      details: languageHealth.kotlinRiskOnJava25
+        ? `Java ${languageHealth.javaVersion || languageHealth.javaMajor || 'unknown'} may break Kotlin tooling.`
+        : `Java ${languageHealth.javaVersion || languageHealth.javaMajor || 'unknown'} looks good.`,
+      fixLabel: languageHealth.kotlinRiskOnJava25 ? 'Use JDK 21 Path' : undefined,
+    },
+    {
+      id: 'modules',
+      title: 'Android Modules',
+      ok: modules.length > 0,
+      details: modules.length > 0 ? `${modules.length} module(s) found.` : 'No Android modules found in current workspace.',
+      fixLabel: modules.length === 0 ? 'Create Project from Gallery' : undefined,
+    },
+    {
+      id: 'device',
+      title: 'Connected Device / Emulator',
+      ok: devices.some(d => d.status === 'online'),
+      details: devices.some(d => d.status === 'online')
+        ? `${devices.filter(d => d.status === 'online').length} online device(s).`
+        : 'No online devices detected.',
+      fixLabel: devices.some(d => d.status === 'online') ? undefined : 'Start Emulator',
+    },
+  ];
+  return checks;
+}
+async function applyOnboardingV2Fix(id: string): Promise<void> {
+  if (id === 'sdk') {
+    await vscode.env.openExternal(vscode.Uri.parse('https://developer.android.com/studio#command-tools'));
+    return;
+  }
+  if (id === 'jdk') {
+    await vscode.commands.executeCommand('android-toolkit.setJdk21Path');
+    return;
+  }
+  if (id === 'modules') {
+    await vscode.commands.executeCommand('android-toolkit.openTemplateGallery');
+    return;
+  }
+  if (id === 'device') {
+    await vscode.commands.executeCommand('android-toolkit.startEmulator');
+    return;
+  }
+}
+async function openOnboardingV2Panel(force = false): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  if (!force) {
+    if (extensionContext.globalState.get<boolean>(FIRST_RUN_WIZARD_SUCCESS_KEY, false)) {
+      return;
+    }
+    if (extensionContext.globalState.get<boolean>(FIRST_RUN_WIZARD_SEEN_KEY, false)) {
+      return;
+    }
+  }
+  await extensionContext.globalState.update(FIRST_RUN_WIZARD_SEEN_KEY, true);
+  const { OnboardingPanel } = lazyLoad<typeof import('./ui/onboardingPanel')>('./ui/onboardingPanel');
+  OnboardingPanel.createOrShow({
+    load: async () => {
+      const checks = await getOnboardingV2Checks();
+      const success = checks.length > 0 && checks.every(check => check.ok);
+      await extensionContext?.globalState.update(FIRST_RUN_WIZARD_SUCCESS_KEY, success);
+      return checks;
+    },
+    fix: async (id: string) => applyOnboardingV2Fix(id),
+    fixAll: async () => {
+      const checks = await getOnboardingV2Checks();
+      for (const check of checks) {
+        if (!check.ok) {
+          await applyOnboardingV2Fix(check.id);
+        }
+      }
+    },
+    openRunPanel: async () => {
+      await vscode.commands.executeCommand('android-toolkit.openRunPanel');
     },
   });
-  items.push({
-    label: languageHealth.kotlinRiskOnJava25 ? '$(warning) Java Runtime' : '$(check) Java Runtime',
-    description: languageHealth.kotlinRiskOnJava25
-      ? `Java ${languageHealth.javaVersion || languageHealth.javaMajor || 'unknown'} may break Kotlin LS`
-      : `Java ${languageHealth.javaVersion || languageHealth.javaMajor || 'unknown'}`,
-    action: languageHealth.kotlinRiskOnJava25 ? async () => {
-      await vscode.commands.executeCommand('android-toolkit.setJdk21Path');
-    } : undefined,
-  });
-  items.push({
-    label: modules.length > 0 ? '$(check) Android Modules' : '$(warning) Android Modules',
-    description: modules.length > 0 ? `${modules.length} module(s) found` : 'No app modules found in workspace',
-  });
-  const online = devices.filter(d => d.status === 'online');
-  items.push({
-    label: online.length > 0 ? '$(check) Connected Devices' : '$(warning) Connected Devices',
-    description: online.length > 0 ? `${online.length} online` : 'No online devices/emulators',
-    action: online.length === 0 ? async () => {
-      await vscode.commands.executeCommand('android-toolkit.startEmulator');
-    } : undefined,
-  });
-
-  const quickPick = await vscode.window.showQuickPick(
-    [
-      ...items.map(i => ({
-        label: i.label,
-        description: i.description,
-        item: i,
-      })),
-      { label: '$(play) Open Run Panel', description: 'Start working', item: { action: async () => vscode.commands.executeCommand('android-toolkit.openRunPanel') } as HealthWizardItem },
-    ],
-    {
-      title: 'Android Tools First-Run Health Wizard',
-      placeHolder: 'Select an item to auto-fix or continue',
-      ignoreFocusOut: true,
-    }
-  );
-  if (quickPick?.item?.action) {
-    await quickPick.item.action();
+}
+async function runReleaseQualityGate(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
   }
-  await extensionContext.globalState.update(FIRST_RUN_WIZARD_DONE_KEY, true);
+  await withProgress('Android Tools: Running release quality gate', async () => {
+    const res = await execCommand('npm', ['run', '-s', 'release:check'], {
+      cwd: workspaceRoot,
+      timeout: 15 * 60 * 1000,
+      env: process.env,
+    });
+    const full = `${res.stdout || ''}\n${res.stderr || ''}`.trim();
+    if (res.exitCode === 0) {
+      showInfo('Release quality gate passed.');
+      return;
+    }
+    await showActionableError({
+      title: 'Release quality gate failed',
+      why: 'One of compile/lint/tests/release checks did not pass.',
+      suggestions: [
+        'Open terminal output and fix the first failing step.',
+        'Run "npm run -s release:check" locally to iterate quickly.',
+      ],
+      actions: [
+        {
+          label: 'Open Output',
+          action: async () => {
+            const doc = await vscode.workspace.openTextDocument({
+              language: 'text',
+              content: full || 'No output captured.',
+            });
+            await vscode.window.showTextDocument(doc, { preview: false });
+          },
+        },
+      ],
+    });
+  });
 }
 async function collectDiagnosticsSnapshot(): Promise<void> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -603,7 +919,7 @@ async function createEmulatorCommand(): Promise<void> {
   }
 }
 async function selectModule(workspaceRoot: string): Promise<string | undefined> {
-  const modules = findApplicationModules(workspaceRoot);
+  const modules = findApplicationModulesCached(workspaceRoot);
   if (modules.length === 0) {
     showError('No Android modules found.');
     return undefined;
@@ -630,6 +946,153 @@ function getDeviceKey(): string {
 }
 function getModuleKey(): string {
   return 'android-tools.selectedModule';
+}
+let onlineDevicesCache: { at: number; devices: AndroidDevice[] } | undefined;
+const modulesCache = new Map<string, { at: number; modules: string[] }>();
+
+async function listOnlineDevicesCached(ttlMs = 1500): Promise<AndroidDevice[]> {
+  const now = Date.now();
+  if (onlineDevicesCache && now - onlineDevicesCache.at <= ttlMs) {
+    return onlineDevicesCache.devices;
+  }
+  const devices = (await listDevicesDetailed()).filter(d => d.status === 'online');
+  onlineDevicesCache = {
+    at: now,
+    devices: devices.map(d => ({
+      id: d.id,
+      status: d.status,
+      type: d.type,
+      model: d.model,
+      androidVersion: d.androidVersion,
+    })),
+  };
+  return onlineDevicesCache.devices;
+}
+
+function invalidateFastCaches(workspaceRoot?: string): void {
+  onlineDevicesCache = undefined;
+  if (workspaceRoot) {
+    modulesCache.delete(workspaceRoot);
+  } else {
+    modulesCache.clear();
+  }
+}
+
+function findApplicationModulesCached(workspaceRoot: string, ttlMs = 4000): string[] {
+  const now = Date.now();
+  const cached = modulesCache.get(workspaceRoot);
+  if (cached && now - cached.at <= ttlMs) {
+    return cached.modules;
+  }
+  const modules = findApplicationModules(workspaceRoot);
+  modulesCache.set(workspaceRoot, { at: now, modules });
+  return modules;
+}
+function recordStartupPhase(name: string, startedAtMs: number, activationStartMs: number): void {
+  const durationMs = Date.now() - startedAtMs;
+  startupProfilerEntries.push({
+    name,
+    durationMs,
+    atMs: Math.max(0, startedAtMs - activationStartMs),
+  });
+}
+async function persistStartupProfiler(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(STARTUP_PROFILER_ENTRIES_KEY, startupProfilerEntries.slice(0, 80));
+  await extensionContext.globalState.update(STARTUP_PROFILER_TOTAL_KEY, startupProfilerTotalMs);
+}
+function openStartupProfilerPanel(): void {
+  StartupProfilerPanel.createOrShow(startupProfilerEntries, startupProfilerTotalMs);
+}
+async function persistActionReplay(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(ACTION_REPLAY_KEY, actionReplay.slice(0, 300));
+}
+function trackActionReplay(action: string, args: unknown, durationMs: number, success: boolean, error?: string): void {
+  actionReplay.unshift({
+    action,
+    args: safeStringify(args),
+    durationMs: Math.max(0, durationMs),
+    success,
+    timestamp: Date.now(),
+    error: error ? String(error).slice(0, 400) : undefined,
+  });
+  if (actionReplay.length > 300) {
+    actionReplay.length = 300;
+  }
+  void persistActionReplay();
+}
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+async function withActionReplay<T>(action: string, args: unknown, fn: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    const result = await fn();
+    trackActionReplay(action, args, Date.now() - startedAt, true);
+    return result;
+  } catch (error) {
+    trackActionReplay(action, args, Date.now() - startedAt, false, error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+}
+async function openActionReplayReport(): Promise<void> {
+  const lines: string[] = [];
+  lines.push('# Android Tools Action Replay');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Records: ${actionReplay.length}`);
+  lines.push('');
+  actionReplay.slice(0, 120).forEach((item, index) => {
+    lines.push(`${index + 1}. ${item.success ? '[OK]' : '[FAIL]'} ${item.action} (${item.durationMs} ms)`);
+    lines.push(`   Args: ${item.args}`);
+    lines.push(`   At: ${new Date(item.timestamp).toISOString()}`);
+    if (item.error) {
+      lines.push(`   Error: ${item.error}`);
+    }
+  });
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: lines.join('\n'),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+async function evaluateConfigPolicy(workspaceRoot: string): Promise<void> {
+  const read = readProjectConfig(workspaceRoot);
+  const policy = read.config.policy;
+  if (!policy) {
+    return;
+  }
+  const moduleName = (await getSelectedModule()) || policy.enforceModule || '';
+  const variant = moduleName ? await getSelectedVariant(moduleName) : '';
+  if (Array.isArray(policy.allowedVariants) && variant && !policy.allowedVariants.includes(variant)) {
+    const key = `variant:${moduleName}:${variant}`;
+    if (!policyWarningsShown.has(key)) {
+      policyWarningsShown.add(key);
+      showWarning(`Policy warning: variant "${variant}" is not allowed by team policy.`);
+    }
+  }
+  if (policy.requiredSettings && typeof policy.requiredSettings === 'object') {
+    const cfg = vscode.workspace.getConfiguration('androidToolkit');
+    for (const [k, expected] of Object.entries(policy.requiredSettings)) {
+      const actual = cfg.get(k);
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        const key = `setting:${k}`;
+        if (!policyWarningsShown.has(key)) {
+          policyWarningsShown.add(key);
+          showWarning(`Policy warning: androidToolkit.${k} should be ${JSON.stringify(expected)}.`);
+        }
+      }
+    }
+  }
 }
 async function getSelectedVariant(moduleName: string): Promise<string> {
   const stored = extensionContext?.globalState.get<string>(getVariantKey(moduleName));
@@ -674,8 +1137,7 @@ async function getVariantOptions(workspaceRoot: string, moduleName: string): Pro
   return parseVariants(tasks, moduleName);
 }
 async function selectDeviceCommand(): Promise<void> {
-  const devices = await listDevicesDetailed();
-  const online = devices.filter(d => d.status === 'online');
+  const online = await listOnlineDevicesCached();
   if (online.length === 0) {
     showWarning('No online devices found.');
     return;
@@ -692,7 +1154,7 @@ async function selectModuleCommand(): Promise<void> {
     showError('No workspace folder open.');
     return;
   }
-  const modules = findApplicationModules(workspaceRoot);
+  const modules = findApplicationModulesCached(workspaceRoot);
   if (modules.length === 0) {
     showError('No Android modules found.');
     return;
@@ -717,7 +1179,7 @@ async function runAppOnTargetSelected(): Promise<void> {
   }
   const variant = await getSelectedVariant(moduleName);
   const selectedDeviceId = await getSelectedDeviceId();
-  const online = (await listDevicesDetailed()).filter(d => d.status === 'online');
+  const online = await listOnlineDevicesCached();
   if (online.length === 0) {
     showWarning('No online devices found.');
     return;
@@ -1257,14 +1719,51 @@ async function selectRunConfiguration(): Promise<RunConfiguration | undefined> {
   );
   return picked?.config;
 }
-async function runRunConfiguration(): Promise<void> {
+function listRunConfigurationsLite(): Array<{ id: string; name: string; moduleName: string; variant: string; deviceId?: string; launchType: 'default' | 'activity' | 'deeplink' }> {
+  return getRunConfigurations().map(c => ({
+    id: c.id,
+    name: c.name,
+    moduleName: c.moduleName,
+    variant: c.variant,
+    deviceId: c.deviceId,
+    launchType: c.launchType,
+  }));
+}
+async function updateRunConfigurationLite(profile: { id: string; name: string; moduleName: string; variant: string; deviceId?: string; launchType: 'default' | 'activity' | 'deeplink' }): Promise<void> {
+  const configs = getRunConfigurations();
+  const index = configs.findIndex(c => c.id === profile.id);
+  if (index < 0) {
+    showWarning('Run configuration not found.');
+    return;
+  }
+  if (!profile.name?.trim() || !profile.moduleName?.trim() || !profile.variant?.trim()) {
+    showWarning('Profile name/module/variant are required.');
+    return;
+  }
+  const current = configs[index];
+  configs[index] = {
+    ...current,
+    name: profile.name.trim(),
+    moduleName: profile.moduleName.trim(),
+    variant: profile.variant.trim(),
+    deviceId: profile.deviceId?.trim() || undefined,
+    launchType: profile.launchType,
+  };
+  await saveRunConfigurations(configs);
+  showInfo(`Profile updated: ${profile.name.trim()}`);
+}
+async function runRunConfigurationById(configId: string, mode: 'run' | 'debug' = 'run'): Promise<void> {
+  const config = getRunConfigurations().find(c => c.id === configId);
+  if (!config) {
+    showWarning('Run configuration not found.');
+    return;
+  }
+  await executeRunConfiguration(config, mode);
+}
+async function executeRunConfiguration(config: RunConfiguration, mode: 'run' | 'debug' = 'run'): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
     showError('No workspace folder open.');
-    return;
-  }
-  const config = await selectRunConfiguration();
-  if (!config) {
     return;
   }
   const env = Object.keys(config.env).length > 0
@@ -1315,6 +1814,56 @@ async function runRunConfiguration(): Promise<void> {
     return;
   }
   await runAppOnTarget(workspaceFolder.uri.fsPath, config.moduleName, config.variant, deviceId);
+  if (mode === 'debug') {
+    await vscode.commands.executeCommand('android-toolkit.attachDebugger');
+  }
+}
+async function runRunConfiguration(mode: 'run' | 'debug' = 'run'): Promise<void> {
+  const config = await selectRunConfiguration();
+  if (!config) {
+    return;
+  }
+  await executeRunConfiguration(config, mode);
+}
+async function duplicateRunConfiguration(configId?: string): Promise<void> {
+  const configs = getRunConfigurations();
+  if (configs.length === 0) {
+    showWarning('No run configurations found.');
+    return;
+  }
+  let source: RunConfiguration | undefined;
+  if (configId) {
+    source = configs.find(c => c.id === configId);
+  }
+  if (!source) {
+    const picked = await vscode.window.showQuickPick(
+      configs.map(c => ({
+        label: c.name,
+        description: `${c.moduleName} • ${c.variant}`,
+        config: c,
+      })),
+      { placeHolder: 'Select run configuration to duplicate' }
+    );
+    source = picked?.config;
+  }
+  if (!source) {
+    return;
+  }
+  const nextName = await vscode.window.showInputBox({
+    prompt: 'Name for duplicated configuration',
+    value: `${source.name} Copy`,
+  });
+  if (!nextName) {
+    return;
+  }
+  const copy: RunConfiguration = {
+    ...source,
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: nextName,
+  };
+  configs.push(copy);
+  await saveRunConfigurations(configs);
+  showInfo(`Run configuration duplicated: ${nextName}`);
 }
 async function deleteRunConfiguration(): Promise<void> {
   const configs = getRunConfigurations();
@@ -1620,6 +2169,20 @@ async function applyRunFixById(fixId: string): Promise<RunActionResult> {
   }
   return { success: false, message: `Unknown fix action: ${fixId}` };
 }
+async function applyRunFixTracked(fixId: string): Promise<RunActionResult> {
+  const result = await applyRunFixById(fixId);
+  runFixAttempts.unshift({
+    fixId,
+    reason: normalizeErrorReason(lastGradleErrorTags[0]),
+    success: result.success,
+    timestamp: Date.now(),
+  });
+  if (runFixAttempts.length > 500) {
+    runFixAttempts.length = 500;
+  }
+  await persistRunFixAttempts();
+  return result;
+}
 async function openRunFailureReport(): Promise<void> {
   const content = buildRunFailureReport(runFailureRecords, 10);
   const doc = await vscode.workspace.openTextDocument({
@@ -1627,6 +2190,121 @@ async function openRunFailureReport(): Promise<void> {
     content,
   });
   await vscode.window.showTextDocument(doc, { preview: false });
+}
+function openFailureInsightsPanel(): void {
+  const summary = summarizeFailureInsights(runFailureRecords, runFixAttempts);
+  FailureInsightsPanel.createOrShow(summary);
+}
+function openSloDashboardPanel(): void {
+  const summary = summarizeSlo(runActionMetrics, sessionHistory, summarizeCommandBudgets(commandLatencyMetrics));
+  SloDashboardPanel.createOrShow(summary);
+}
+function openErrorKnowledgeBasePanel(): void {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const { ErrorKnowledgeBasePanel } = lazyLoad<typeof import('./insights/errorKnowledgeBasePanel')>('./insights/errorKnowledgeBasePanel');
+  ErrorKnowledgeBasePanel.createOrShow(workspaceRoot, runFailureRecords);
+}
+async function runCiSmoke(context: vscode.ExtensionContext): Promise<void> {
+  const output = vscode.window.createOutputChannel('Android Tools CI Smoke');
+  output.clear();
+  output.appendLine('Starting CI smoke checks...');
+  await vscode.commands.executeCommand('android-toolkit.openRunPanel');
+  output.appendLine('[OK] Run panel opened');
+
+  const online = (await listDevicesDetailed()).filter(d => d.status === 'online');
+  output.appendLine(`[INFO] Online devices: ${online.length}`);
+  if (online.length > 0) {
+    const first = online[0];
+    await setSelectedDeviceId(first.id, `${first.id} (${first.type})`);
+    output.appendLine(`[OK] Selected device: ${first.id}`);
+  } else {
+    output.appendLine('[INFO] No online devices available; skipping device selection');
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (workspaceRoot) {
+    const modules = findApplicationModules(workspaceRoot);
+    output.appendLine(`[INFO] Matrix readiness modules: ${modules.length}`);
+    const { MatrixDashboardPanel } = lazyLoad<typeof import('./matrix/matrixDashboardPanel')>('./matrix/matrixDashboardPanel');
+    MatrixDashboardPanel.createOrShow(context, workspaceRoot);
+    output.appendLine('[OK] Matrix dashboard opened (matrix dry-run readiness)');
+    const exported = await exportTeamConfig(context, workspaceRoot);
+    output.appendLine(`[OK] Team config exported: ${exported}`);
+    const imported = await importTeamConfig(context, workspaceRoot);
+    output.appendLine(imported.warnings.length > 0
+      ? `[WARN] Team config imported with warnings: ${imported.warnings.join('; ')}`
+      : '[OK] Team config imported');
+  } else {
+    output.appendLine('[INFO] No workspace folder open; skipping matrix/team checks');
+  }
+  output.appendLine('CI smoke completed.');
+  output.show(true);
+}
+async function exportTeamSettingsCommand(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      showError('No workspace folder open.');
+      return;
+    }
+    const filePath = await exportTeamConfig(context, workspaceRoot);
+    showInfo(`Project settings exported: ${filePath}`);
+  } catch (error) {
+    handleError(error);
+  }
+}
+async function importTeamSettingsCommand(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      showError('No workspace folder open.');
+      return;
+    }
+    const result = await importTeamConfig(context, workspaceRoot);
+    if (result.warnings.length > 0) {
+      showWarning(`Team settings imported with warnings:\\n- ${result.warnings.join('\\n- ')}`);
+    } else {
+      showInfo(`Team settings imported: ${result.filePath}`);
+    }
+  } catch (error) {
+    handleError(error);
+  }
+}
+function openTemplateGallery(): void {
+  const { TemplateGalleryPanel } = lazyLoad<typeof import('./projectView/templateGalleryPanel')>('./projectView/templateGalleryPanel');
+  TemplateGalleryPanel.createOrShow({
+    createProjectFromTemplate: async (template) => {
+      const defaultLang = template === 'compose-empty' ? 'kotlin' : undefined;
+      await createAndroidProjectWizardWithOptions({
+        templateValue: template,
+        languageValue: defaultLang as 'kotlin' | 'java' | undefined,
+      });
+    },
+  });
+}
+function openRunProfilesV2(): void {
+  const { RunProfilesPanel } = lazyLoad<typeof import('./run/runProfilesPanel')>('./run/runProfilesPanel');
+  RunProfilesPanel.createOrShow({
+    listProfiles: async () => listRunConfigurationsLite(),
+    createProfile: async () => createRunConfiguration(),
+    updateProfile: async (profile) => updateRunConfigurationLite(profile),
+    deleteProfile: async (id: string) => {
+      const configs = getRunConfigurations();
+      const target = configs.find(c => c.id === id);
+      if (!target) {
+        return;
+      }
+      await saveRunConfigurations(configs.filter(c => c.id !== id));
+      showInfo(`Deleted run configuration: ${target.name}`);
+    },
+    runProfile: async (id: string) => runRunConfigurationById(id, 'run'),
+    debugProfile: async (id: string) => runRunConfigurationById(id, 'debug'),
+    duplicateProfile: async (id: string) => duplicateRunConfiguration(id),
+  });
 }
 async function deviceExplorerPull(item: any): Promise<void> {
   if (!item?.data?.deviceId || !item?.data?.path) {
@@ -1807,7 +2485,45 @@ function createEmulatorControlCommands(
   ];
 }
 export function activate(context: vscode.ExtensionContext): void {
+  const activationStartedAt = Date.now();
+  startupProfilerEntries.length = 0;
   extensionContext = context;
+  const persistedStartupEntries = context.globalState.get<StartupProfilerEntry[]>(STARTUP_PROFILER_ENTRIES_KEY, []);
+  startupProfilerEntries.splice(0, startupProfilerEntries.length, ...persistedStartupEntries);
+  startupProfilerTotalMs = context.globalState.get<number>(STARTUP_PROFILER_TOTAL_KEY, 0);
+  const persistedActionReplay = context.globalState.get<ActionReplayRecord[]>(ACTION_REPLAY_KEY, []);
+  if (persistedActionReplay.length > 0) {
+    actionReplay.splice(0, actionReplay.length, ...persistedActionReplay.slice(0, 300));
+  }
+  const persistedMetrics = context.globalState.get<RunActionMetric[]>(RUN_ACTION_METRICS_KEY, []);
+  if (persistedMetrics.length > 0) {
+    runActionMetrics.splice(0, runActionMetrics.length, ...persistedMetrics.slice(0, 1000));
+  }
+  const persistedCommandMetrics = context.globalState.get<CommandLatencyRecord[]>(COMMAND_LATENCY_METRICS_KEY, []);
+  if (persistedCommandMetrics.length > 0) {
+    commandLatencyMetrics.splice(0, commandLatencyMetrics.length, ...persistedCommandMetrics.slice(0, 1000));
+  }
+  const persistedSessions = context.globalState.get<SessionRecord[]>(SESSION_HISTORY_KEY, []);
+  if (persistedSessions.length > 0) {
+    sessionHistory.splice(0, sessionHistory.length, ...persistedSessions.slice(0, 300));
+  }
+  const persistedFailures = context.globalState.get<RunFailureRecord[]>(RUN_FAILURE_RECORDS_KEY, []);
+  if (persistedFailures.length > 0) {
+    runFailureRecords.splice(
+      0,
+      runFailureRecords.length,
+      ...persistedFailures.slice(0, 500).map(item => ({ ...item, reason: normalizeErrorReason(item.reason) }))
+    );
+  }
+  const persistedFixAttempts = context.globalState.get<RunFixAttemptRecord[]>(RUN_FIX_ATTEMPTS_KEY, []);
+  if (persistedFixAttempts.length > 0) {
+    runFixAttempts.splice(
+      0,
+      runFixAttempts.length,
+      ...persistedFixAttempts.slice(0, 500).map(item => ({ ...item, reason: normalizeErrorReason(item.reason) }))
+    );
+  }
+  const tStatusBar = Date.now();
   createStatusBar(context);
   const storedDeviceId = extensionContext.globalState.get<string>(getDeviceKey());
   if (storedDeviceId) {
@@ -1818,6 +2534,8 @@ export function activate(context: vscode.ExtensionContext): void {
     setSelectedModuleLabel(`Module: ${storedModule}`);
     getSelectedVariant(storedModule).then(v => setSelectedVariantLabel(`Variant: ${v}`)).catch(() => {});
   }
+  recordStartupPhase('statusBar:init', tStatusBar, activationStartedAt);
+  const tViews = Date.now();
   const projectProvider = new AndroidProjectProvider();
   const projectTreeView = vscode.window.createTreeView('androidProjectView', {
     treeDataProvider: projectProvider,
@@ -1845,15 +2563,24 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('androidProblemsView', problemsProvider)
   );
+  recordStartupPhase('views:register', tViews, activationStartedAt);
+  logPerf('activate:registerViews', Date.now() - activationStartedAt);
   const autoSyncEnabled = vscode.workspace.getConfiguration('androidToolkit').get<boolean>('sync.autoSync.enabled', true);
   const autoSyncInterval = vscode.workspace.getConfiguration('androidToolkit').get<number>('sync.autoSync.intervalMs', 4000);
   let lastDeviceFingerprint = '';
+  let autoSyncInFlight = false;
+  let autoSyncQueued = false;
   const buildDeviceFingerprint = (items: Array<{ id: string; status: string; type: string }>): string =>
     items
       .map(d => `${d.id}:${d.status}:${d.type}`)
       .sort((a, b) => a.localeCompare(b))
       .join('|');
   const runAutoSyncTick = async (): Promise<void> => {
+    if (autoSyncInFlight) {
+      autoSyncQueued = true;
+      return;
+    }
+    autoSyncInFlight = true;
     try {
       await EmulatorStateService.getInstance().forceCheck();
       const devices = await listDevicesDetailed();
@@ -1862,27 +2589,29 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       lastDeviceFingerprint = next;
+      invalidateFastCaches(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
       projectProvider.refresh();
       controlProvider.refresh();
       deviceManagerProvider.refresh();
       deviceFileExplorerProvider.refresh();
       refreshStatusBar();
     } catch {
+    } finally {
+      autoSyncInFlight = false;
+      if (autoSyncQueued) {
+        autoSyncQueued = false;
+        setTimeout(() => void runAutoSyncTick(), 120);
+      }
     }
   };
-  let autoSyncTimer: NodeJS.Timeout | undefined;
   if (autoSyncEnabled) {
-    autoSyncTimer = setInterval(() => {
-      runAutoSyncTick().catch(() => {});
-    }, Math.max(1500, autoSyncInterval));
-    context.subscriptions.push(
-      new vscode.Disposable(() => {
-        if (autoSyncTimer) {
-          clearInterval(autoSyncTimer);
-        }
-      })
-    );
+    backgroundScheduler.register('autoSync', Math.max(1500, autoSyncInterval), async () => {
+      await runAutoSyncTick();
+    });
+    backgroundScheduler.start('autoSync');
+    context.subscriptions.push(new vscode.Disposable(() => backgroundScheduler.stop('autoSync')));
   }
+  const tLanguage = Date.now();
   const xmlLivePreviewController = new XmlLivePreviewController();
   const xmlLintController = new AndroidLayoutLintController();
   context.subscriptions.push(xmlLivePreviewController);
@@ -1914,10 +2643,27 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     )
   );
+  recordStartupPhase('languages:register', tLanguage, activationStartedAt);
   const workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    invalidateFastCaches();
     projectProvider.refresh();
   });
   context.subscriptions.push(workspaceWatcher);
+  const workspaceFileWatcher = vscode.workspace.createFileSystemWatcher('**/{settings.gradle,settings.gradle.kts,build.gradle,build.gradle.kts,gradle.properties,local.properties}');
+  const invalidateFromWorkspaceChange = (): void => {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    invalidateFastCaches(workspaceRoot);
+    if (workspaceRoot) {
+      invalidateGradleTaskCache(workspaceRoot);
+    } else {
+      invalidateGradleTaskCache();
+    }
+  };
+  workspaceFileWatcher.onDidChange(invalidateFromWorkspaceChange);
+  workspaceFileWatcher.onDidCreate(invalidateFromWorkspaceChange);
+  workspaceFileWatcher.onDidDelete(invalidateFromWorkspaceChange);
+  context.subscriptions.push(workspaceFileWatcher);
+  const tCommands = Date.now();
   const commands = [
     vscode.commands.registerCommand('android-toolkit.listDevices', listDevicesCommand),
     vscode.commands.registerCommand('android-toolkit.startEmulator', startEmulatorCommand),
@@ -1963,6 +2709,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.createProject', () => {
       createAndroidProjectWizard();
     }),
+    vscode.commands.registerCommand('android-toolkit.openTemplateGallery', () => {
+      openTemplateGallery();
+    }),
     vscode.commands.registerCommand('android-toolkit.setJdk21Path', async () => {
       const ok = await setJdk21Path();
       if (ok) {
@@ -1979,11 +2728,45 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.openRunFailureReport', async () => {
       await openRunFailureReport();
     }),
+    vscode.commands.registerCommand('android-toolkit.openStartupProfiler', () => {
+      openStartupProfilerPanel();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openActionReplayReport', async () => {
+      await openActionReplayReport();
+    }),
+    vscode.commands.registerCommand('android-toolkit.releaseQualityGate', async () => {
+      await runReleaseQualityGate();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openFailureInsights', () => {
+      openFailureInsightsPanel();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openSloDashboard', () => {
+      openSloDashboardPanel();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openErrorKnowledgeBase', () => {
+      openErrorKnowledgeBasePanel();
+    }),
+    vscode.commands.registerCommand('android-toolkit.exportTeamConfig', async () => {
+      await exportTeamSettingsCommand(context);
+    }),
+    vscode.commands.registerCommand('android-toolkit.importTeamConfig', async () => {
+      await importTeamSettingsCommand(context);
+    }),
+    vscode.commands.registerCommand('android-toolkit.ciSmoke', async () => {
+      await runCiSmoke(context);
+    }),
     vscode.commands.registerCommand('android-toolkit.firstRunHealthWizard', async () => {
       await openFirstRunHealthWizard(true);
     }),
+    vscode.commands.registerCommand('android-toolkit.openOnboardingV2', async () => {
+      await openOnboardingV2Panel(true);
+    }),
     vscode.commands.registerCommand('android-toolkit.runSelectedAlias', async () => {
-      await runAppOnTargetSelected();
+      await withCommandBudget('android-toolkit.runSelectedAlias', async () => {
+        await withActionReplay('android-toolkit.runSelectedAlias', {}, async () => {
+          await runAppOnTargetSelected();
+        });
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.stopSelectedAlias', async () => {
       await stopAppCommand();
@@ -2062,6 +2845,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await setSelectedFlavor(moduleName, flavor === '(none)' ? '' : flavor);
       await setSelectedBuildType(moduleName, buildType);
       await setSelectedVariant(moduleName, variant);
+      await evaluateConfigPolicy(workspaceFolder.uri.fsPath);
       showInfo(`Selected variant: ${variant}`);
     }),
     vscode.commands.registerCommand('android-toolkit.gradleAssembleDebug', () => {
@@ -2073,7 +2857,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.gradleClean', () => {
       gradleClean();
     }),
-    vscode.commands.registerCommand('android-toolkit.openRunPanel', () => {
+    vscode.commands.registerCommand('android-toolkit.openRunPanel', async () => {
+      await withCommandBudget('android-toolkit.openRunPanel', async () => {
       const fixSuggestionsForGradle = (): RunFixSuggestion[] => {
         const fixes: RunFixSuggestion[] = [{ id: 'showGradleOutput', label: 'Open Gradle Output' }];
         if (lastGradleErrorTags.includes('taskNotFound') || (lastGradleErrorSummary && /task .* not found|cannot locate tasks/i.test(lastGradleErrorSummary))) {
@@ -2089,7 +2874,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         if (
           lastGradleErrorTags.includes('jdkMismatch') ||
-          lastGradleErrorTags.includes('kotlinK2') ||
+          lastGradleErrorTags.includes('kotlinRuntime') ||
           (lastGradleErrorSummary && /java|jvm|kotlin language server|25\\.0\\.1|jdk/i.test(lastGradleErrorSummary))
         ) {
           fixes.unshift({ id: 'setJdk21Path', label: 'Use JDK 21 Path' });
@@ -2102,17 +2887,48 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         return fixes;
       };
+      const enrichRunFailure = (result: RunActionResult): RunActionResult => {
+        if (result.success) {
+          return result;
+        }
+        const reason = normalizeErrorReason(lastGradleErrorTags[0]);
+        const meta = ERROR_REASON_META[reason];
+        const details: string[] = [];
+        if (result.gradleError?.trim()) {
+          details.push(result.gradleError.trim());
+        } else if (lastGradleErrorSummary) {
+          details.push(lastGradleErrorSummary);
+        }
+        details.push(`Reason: ${meta.title}`);
+        details.push(`Why: ${meta.why}`);
+        details.push(`Suggested: ${meta.autoFix}`);
+        const enrichedFixes = result.fixSuggestions && result.fixSuggestions.length > 0
+          ? result.fixSuggestions
+          : fixSuggestionsForGradle();
+        return {
+          ...result,
+          gradleError: details.join('\n'),
+          fixSuggestions: enrichedFixes,
+        };
+      };
       const finalizeRunResult = (
         action: string,
         result: RunActionResult,
         moduleName: string,
         variant: string,
-        deviceId: string
+        deviceId: string,
+        durationMs?: number
       ): RunActionResult => {
-        reportRunProblem(action, result, { moduleName, variant, deviceId });
-        return result;
+        const normalized = enrichRunFailure(result);
+        reportRunProblem(action, normalized, { moduleName, variant, deviceId });
+        if (typeof durationMs === 'number') {
+          trackActionMetric(action, normalized, durationMs);
+          trackActionReplay(`runPanel:${action.toLowerCase()}`, { moduleName, variant, deviceId }, durationMs, normalized.success, normalized.success ? undefined : normalized.message);
+        }
+        return normalized;
       };
       const runFlow = async (workspaceRoot: string, moduleName: string, variant: string, deviceId: string): Promise<RunActionResult> => {
+        const startedAt = Date.now();
         const opId = operationManager.start(RUN_PANEL_SCOPE);
         const shouldCancel = () => operationManager.isCancelled(RUN_PANEL_SCOPE, opId);
         const preflight = await runPreflightChecks(workspaceRoot, moduleName, variant, deviceId, true);
@@ -2122,7 +2938,7 @@ export function activate(context: vscode.ExtensionContext): void {
             success: false,
             message: preflight.message || 'Preflight checks failed',
             fixSuggestions: preflight.fixes,
-          }, moduleName, variant, deviceId);
+          }, moduleName, variant, deviceId, Date.now() - startedAt);
         }
         const installGuard = await runGuarded(
           'Install APK',
@@ -2136,7 +2952,8 @@ export function activate(context: vscode.ExtensionContext): void {
             issueToRunResult(installGuard.issue!, 'Install failed.', fixSuggestionsForGradle()),
             moduleName,
             variant,
-            deviceId
+            deviceId,
+            Date.now() - startedAt
           );
         }
         const installed = Boolean(installGuard.value);
@@ -2148,7 +2965,7 @@ export function activate(context: vscode.ExtensionContext): void {
             gradleError: lastGradleErrorSummary,
             errorLocation: lastGradleErrorLocation,
             fixSuggestions: fixSuggestionsForGradle(),
-          }, moduleName, variant, deviceId);
+          }, moduleName, variant, deviceId, Date.now() - startedAt);
         }
         const packageName = findApplicationId(workspaceRoot, moduleName);
         if (!packageName) {
@@ -2157,7 +2974,7 @@ export function activate(context: vscode.ExtensionContext): void {
             success: false,
             message: 'Cannot resolve applicationId from project.',
             fixSuggestions: [{ id: 'showGradleOutput', label: 'Open Gradle Output' }],
-          }, moduleName, variant, deviceId);
+          }, moduleName, variant, deviceId, Date.now() - startedAt);
         }
         const startGuard = await runGuarded(
           'Start app',
@@ -2171,7 +2988,8 @@ export function activate(context: vscode.ExtensionContext): void {
             issueToRunResult(startGuard.issue!, 'Failed to start app.', [{ id: 'showGradleOutput', label: 'Open Gradle Output' }]),
             moduleName,
             variant,
-            deviceId
+            deviceId,
+            Date.now() - startedAt
           );
         }
         const startResult = startGuard.value;
@@ -2181,16 +2999,15 @@ export function activate(context: vscode.ExtensionContext): void {
             success: false,
             message: startResult.message,
             fixSuggestions: [{ id: 'showGradleOutput', label: 'Open Gradle Output' }],
-          }, moduleName, variant, deviceId);
+          }, moduleName, variant, deviceId, Date.now() - startedAt);
         }
         await appendRunHistory({ moduleName, variant, deviceId });
         operationManager.finish(RUN_PANEL_SCOPE, opId);
-        return finalizeRunResult('Run', { success: true, message: `App started on ${deviceId}` }, moduleName, variant, deviceId);
+        return finalizeRunResult('Run', { success: true, message: `App started on ${deviceId}` }, moduleName, variant, deviceId, Date.now() - startedAt);
       };
       RunPanel.createOrShow({
         getDevices: async () => {
-          const devices = await listDevicesDetailed();
-          const online = devices.filter(d => d.status === 'online');
+          const online = await listOnlineDevicesCached();
           const selectedModule = await getSelectedModule();
           const selectedVariant = selectedModule ? await getSelectedVariant(selectedModule) : undefined;
           const selectedDevice = await getSelectedDeviceId();
@@ -2213,7 +3030,7 @@ export function activate(context: vscode.ExtensionContext): void {
           if (!workspaceFolder) {
             return [];
           }
-          return findApplicationModules(workspaceFolder.uri.fsPath);
+          return findApplicationModulesCached(workspaceFolder.uri.fsPath);
         },
         getVariants: async (moduleName: string) => {
           const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -2229,6 +3046,10 @@ export function activate(context: vscode.ExtensionContext): void {
         },
         setVariant: async (moduleName: string, variant: string) => {
           await setSelectedVariant(moduleName, variant);
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+          if (workspaceFolder) {
+            await evaluateConfigPolicy(workspaceFolder.uri.fsPath);
+          }
         },
         setFlavor: async (moduleName: string, flavor: string) => {
           await setSelectedFlavor(moduleName, flavor);
@@ -2237,12 +3058,13 @@ export function activate(context: vscode.ExtensionContext): void {
           await setSelectedBuildType(moduleName, buildType);
         },
         build: async (moduleName: string) => {
+          const startedAt = Date.now();
           const opId = operationManager.start(RUN_PANEL_SCOPE);
           const shouldCancel = () => operationManager.isCancelled(RUN_PANEL_SCOPE, opId);
           const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
           if (!workspaceFolder) {
             operationManager.finish(RUN_PANEL_SCOPE, opId);
-            return finalizeRunResult('Build', { success: false, message: 'No workspace folder open' }, moduleName, '', '');
+            return finalizeRunResult('Build', { success: false, message: 'No workspace folder open' }, moduleName, '', '', Date.now() - startedAt);
           }
           const variant = await getSelectedVariant(moduleName);
           const preflight = await runPreflightChecks(workspaceFolder.uri.fsPath, moduleName, variant, '', false);
@@ -2252,7 +3074,7 @@ export function activate(context: vscode.ExtensionContext): void {
               success: false,
               message: preflight.message || 'Preflight checks failed',
               fixSuggestions: preflight.fixes,
-            }, moduleName, variant, '');
+            }, moduleName, variant, '', Date.now() - startedAt);
           }
           const buildGuard = await runGuarded(
             'Build variant',
@@ -2261,7 +3083,7 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           if (!buildGuard.ok) {
             operationManager.finish(RUN_PANEL_SCOPE, opId);
-            return finalizeRunResult('Build', issueToRunResult(buildGuard.issue!, 'Build failed.', fixSuggestionsForGradle()), moduleName, variant, '');
+            return finalizeRunResult('Build', issueToRunResult(buildGuard.issue!, 'Build failed.', fixSuggestionsForGradle()), moduleName, variant, '', Date.now() - startedAt);
           }
           const ok = Boolean(buildGuard.value);
           operationManager.finish(RUN_PANEL_SCOPE, opId);
@@ -2271,19 +3093,20 @@ export function activate(context: vscode.ExtensionContext): void {
             gradleError: ok ? undefined : lastGradleErrorSummary,
             errorLocation: ok ? undefined : lastGradleErrorLocation,
             fixSuggestions: ok ? undefined : fixSuggestionsForGradle(),
-          }, moduleName, variant, '');
+          }, moduleName, variant, '', Date.now() - startedAt);
         },
         install: async (moduleName: string, deviceId: string) => {
+          const startedAt = Date.now();
           const opId = operationManager.start(RUN_PANEL_SCOPE);
           const shouldCancel = () => operationManager.isCancelled(RUN_PANEL_SCOPE, opId);
           const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
           if (!workspaceFolder) {
             operationManager.finish(RUN_PANEL_SCOPE, opId);
-            return finalizeRunResult('Install', { success: false, message: 'No workspace folder open' }, moduleName, '', deviceId);
+            return finalizeRunResult('Install', { success: false, message: 'No workspace folder open' }, moduleName, '', deviceId, Date.now() - startedAt);
           }
           if (!deviceId) {
             operationManager.finish(RUN_PANEL_SCOPE, opId);
-            return finalizeRunResult('Install', { success: false, message: 'Select a device', fixSuggestions: [{ id: 'selectDevice', label: 'Select Device' }] }, moduleName, '', deviceId);
+            return finalizeRunResult('Install', { success: false, message: 'Select a device', fixSuggestions: [{ id: 'selectDevice', label: 'Select Device' }] }, moduleName, '', deviceId, Date.now() - startedAt);
           }
           const variant = await getSelectedVariant(moduleName);
           const preflight = await runPreflightChecks(workspaceFolder.uri.fsPath, moduleName, variant, deviceId, true);
@@ -2293,7 +3116,7 @@ export function activate(context: vscode.ExtensionContext): void {
               success: false,
               message: preflight.message || 'Preflight checks failed',
               fixSuggestions: preflight.fixes,
-            }, moduleName, variant, deviceId);
+            }, moduleName, variant, deviceId, Date.now() - startedAt);
           }
           const installGuard = await runGuarded(
             'Install variant',
@@ -2302,7 +3125,7 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           if (!installGuard.ok) {
             operationManager.finish(RUN_PANEL_SCOPE, opId);
-            return finalizeRunResult('Install', issueToRunResult(installGuard.issue!, 'Install failed.', fixSuggestionsForGradle()), moduleName, variant, deviceId);
+            return finalizeRunResult('Install', issueToRunResult(installGuard.issue!, 'Install failed.', fixSuggestionsForGradle()), moduleName, variant, deviceId, Date.now() - startedAt);
           }
           const ok = Boolean(installGuard.value);
           operationManager.finish(RUN_PANEL_SCOPE, opId);
@@ -2312,7 +3135,7 @@ export function activate(context: vscode.ExtensionContext): void {
             gradleError: ok ? undefined : lastGradleErrorSummary,
             errorLocation: ok ? undefined : lastGradleErrorLocation,
             fixSuggestions: ok ? undefined : fixSuggestionsForGradle(),
-          }, moduleName, variant, deviceId);
+          }, moduleName, variant, deviceId, Date.now() - startedAt);
         },
         run: async (moduleName: string, deviceId: string) => {
           const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -2438,7 +3261,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return { success: false, message: `Unknown preset: ${presetId}` };
         },
         applyFix: async (fixId: string, _moduleName: string, _deviceId: string) => {
-          return applyRunFixById(fixId);
+          return applyRunFixTracked(fixId);
         },
         getHealth: async () => {
           const health = await getLanguageHealthStatus();
@@ -2480,6 +3303,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return { success: false, message: `Unknown quick action: ${actionId}` };
         },
       });
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.showGradleOutput', () => {
       revealGradleOutput();
@@ -2500,7 +3324,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!fixId) {
         return;
       }
-      await applyRunFixById(fixId);
+      await applyRunFixTracked(fixId);
     }),
     vscode.commands.registerCommand('android-toolkit.problemOpenLocation', async (item?: AndroidProblemTreeItem) => {
       const loc = item?.entry?.location;
@@ -2659,10 +3483,19 @@ export function activate(context: vscode.ExtensionContext): void {
       createRunConfiguration();
     }),
     vscode.commands.registerCommand('android-toolkit.runRunConfiguration', () => {
-      runRunConfiguration();
+      runRunConfiguration('run');
+    }),
+    vscode.commands.registerCommand('android-toolkit.runDebugConfiguration', () => {
+      runRunConfiguration('debug');
     }),
     vscode.commands.registerCommand('android-toolkit.deleteRunConfiguration', () => {
       deleteRunConfiguration();
+    }),
+    vscode.commands.registerCommand('android-toolkit.duplicateRunConfiguration', () => {
+      duplicateRunConfiguration();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openRunProfilesV2', () => {
+      openRunProfilesV2();
     }),
     vscode.commands.registerCommand('android-toolkit.openAdbShell', () => {
       openAdbShell();
@@ -2755,6 +3588,15 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       await runDependencyInsight(workspaceRoot, moduleName);
+    }),
+    vscode.commands.registerCommand('android-toolkit.openGradleIntelligence', async () => {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        showError('No workspace folder open.');
+        return;
+      }
+      const { GradleIntelligencePanel } = lazyLoad<typeof import('./gradle/gradleIntelligencePanel')>('./gradle/gradleIntelligencePanel');
+      GradleIntelligencePanel.createOrShow(workspaceRoot);
     }),
     vscode.commands.registerCommand('android-toolkit.openComposePreview', () => {
       const { ComposePreviewPanel } = lazyLoad<typeof import('./compose/composePreviewPanel')>('./compose/composePreviewPanel');
@@ -3087,23 +3929,43 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   ];
   context.subscriptions.push(...commands);
+  recordStartupPhase('commands:register', tCommands, activationStartedAt);
+  void startSession(context);
+  logPerf('activate:commandsRegistered', Date.now() - activationStartedAt);
   checkLanguageExtensions(context).catch(() => {});
   setTimeout(() => {
-    openFirstRunHealthWizard(false).catch(() => {});
+    openOnboardingV2Panel(false).catch(() => {});
   }, 1200);
+  setTimeout(() => {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspaceRoot) {
+      evaluateConfigPolicy(workspaceRoot).catch(() => {});
+    }
+  }, 1600);
   const deferMonitoring = vscode.workspace.getConfiguration('androidToolkit').get<boolean>('performance.deferBackgroundMonitoring', true);
-  if (deferMonitoring) {
-    setTimeout(() => {
-      EmulatorStateService.getInstance().startMonitoring();
-    }, 2500);
-  } else {
-    EmulatorStateService.getInstance().startMonitoring();
+  if (!autoSyncEnabled) {
+    const scheduleBackground = (): void => {
+      backgroundScheduler.register('emulatorStateProbe', 2200, async () => {
+        await EmulatorStateService.getInstance().forceCheck();
+      });
+      backgroundScheduler.start('emulatorStateProbe');
+    };
+    if (deferMonitoring) {
+      setTimeout(scheduleBackground, 2500);
+    } else {
+      scheduleBackground();
+    }
+    context.subscriptions.push(new vscode.Disposable(() => backgroundScheduler.stop('emulatorStateProbe')));
   }
+  startupProfilerTotalMs = Date.now() - activationStartedAt;
+  void persistStartupProfiler();
+  logPerf('activate:total', Date.now() - activationStartedAt);
 }
 export function deactivate(): void {
+  endSession(true);
+  backgroundScheduler.stopAll();
   const { logcatManager } = require('./logcat/logcatStream');
   logcatManager.stopAll();
   const { debugSession } = require('./debug/debugAdapter');
   debugSession.dispose();
-  EmulatorStateService.getInstance().stopMonitoring();
 }

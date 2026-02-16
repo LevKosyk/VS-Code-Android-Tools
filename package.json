@@ -1,8 +1,8 @@
 {
   "name": "vscode-android-tools",
-  "displayName": "VS Code Android Tools",
-  "description": "Run, debug, and manage Android apps in VS Code with a focused Android toolkit",
-  "version": "0.2.1",
+  "displayName": "Android Tools for VS Code",
+  "description": "Android extension for VS Code: ADB, emulator manager, Logcat, Gradle run/debug, APK install, and XML tools",
+  "version": "0.2.2",
   "publisher": "levkosyk",
   "license": "MIT",
   "icon": "assets/logo/logo.png",
@@ -23,14 +23,29 @@
   ],
   "keywords": [
     "android",
+    "android studio",
+    "android development",
     "adb",
+    "avd",
     "emulator",
+    "emulator manager",
+    "device manager",
     "gradle",
     "logcat",
+    "android debugger",
+    "android run",
+    "android xml",
+    "layout preview",
+    "compose",
     "kotlin",
     "java",
     "apk"
   ],
+  "qna": "marketplace",
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -206,6 +221,11 @@
         "icon": "$(rocket)"
       },
       {
+        "command": "android-toolkit.openTemplateGallery",
+        "title": "Android: Open Template Gallery",
+        "icon": "$(library)"
+      },
+      {
         "command": "android-toolkit.setJdk21Path",
         "title": "Android: Use JDK 21 Path"
       },
@@ -227,6 +247,10 @@
       {
         "command": "android-toolkit.firstRunHealthWizard",
         "title": "Android: First-Run Health Wizard"
+      },
+      {
+        "command": "android-toolkit.openOnboardingV2",
+        "title": "Android: Open Onboarding v2"
       },
       {
         "command": "android-toolkit.runSelectedAlias",
@@ -251,6 +275,44 @@
       {
         "command": "android-toolkit.openRunFailureReport",
         "title": "Android: Open Run Failure Report"
+      },
+      {
+        "command": "android-toolkit.openStartupProfiler",
+        "title": "Android: Open Startup Profiler",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "android-toolkit.openActionReplayReport",
+        "title": "Android: Open Action Replay Report",
+        "icon": "$(history)"
+      },
+      {
+        "command": "android-toolkit.releaseQualityGate",
+        "title": "Android: Run Release Quality Gate",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "android-toolkit.openFailureInsights",
+        "title": "Android: Open Failure Insights Panel",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "android-toolkit.openSloDashboard",
+        "title": "Android: Open Stability SLO Dashboard",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "android-toolkit.openErrorKnowledgeBase",
+        "title": "Android: Open Error Knowledge Base",
+        "icon": "$(book)"
+      },
+      {
+        "command": "android-toolkit.exportTeamConfig",
+        "title": "Android: Export Team Project Config"
+      },
+      {
+        "command": "android-toolkit.importTeamConfig",
+        "title": "Android: Import Team Project Config"
       },
       {
         "command": "android-toolkit.selectBuildVariant",
@@ -311,8 +373,20 @@
         "title": "Android: Run Run Configuration"
       },
       {
+        "command": "android-toolkit.runDebugConfiguration",
+        "title": "Android: Debug Run Configuration"
+      },
+      {
+        "command": "android-toolkit.duplicateRunConfiguration",
+        "title": "Android: Duplicate Run Configuration"
+      },
+      {
         "command": "android-toolkit.deleteRunConfiguration",
         "title": "Android: Delete Run Configuration"
+      },
+      {
+        "command": "android-toolkit.openRunProfilesV2",
+        "title": "Android: Open Run/Debug Profiles v2"
       },
       {
         "command": "android-toolkit.analyzeApk",
@@ -433,6 +507,11 @@
         "command": "android-toolkit.dependencyInsight",
         "title": "Android: Dependency Insight",
         "icon": "$(git-merge)"
+      },
+      {
+        "command": "android-toolkit.openGradleIntelligence",
+        "title": "Android: Open Gradle Intelligence",
+        "icon": "$(pulse)"
       },
       {
         "command": "android-toolkit.openComposePreview",
@@ -684,6 +763,11 @@
           "group": "navigation@0"
         },
         {
+          "command": "android-toolkit.openTemplateGallery",
+          "when": "view == androidProjectView",
+          "group": "navigation@0"
+        },
+        {
           "command": "android-toolkit.openRunPanel",
           "when": "view == androidProjectView",
           "group": "navigation@0"
@@ -831,6 +915,18 @@
         "when": "editorTextFocus || terminalFocus || view == androidProjectView"
       },
       {
+        "command": "android-toolkit.openRunPanel",
+        "key": "ctrl+alt+o",
+        "mac": "cmd+alt+o",
+        "when": "editorTextFocus || terminalFocus || view == androidProjectView"
+      },
+      {
+        "command": "android-toolkit.problemApplyFix",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f",
+        "when": "view == androidProblemsView && viewItem == android-problem-fix"
+      },
+      {
         "command": "android-toolkit.logcatThisApp",
         "key": "ctrl+alt+l",
         "mac": "cmd+alt+l",
@@ -898,14 +994,19 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run prepublish:gate",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test": "npm run compile && node test/run-node-tests.js",
     "test:p0": "npm run compile && node --test test/p0-run-scenarios-smoke.test.js test/commands-smoke.test.js",
     "test:runtime": "npm run compile && node test/vscode/runTest.js",
-    "release:check": "npm run compile && npm run lint && npm test --silent && npm run test:p0",
+    "release:notes": "node scripts/check-release.js",
+    "release:automate": "node scripts/release-automate.js patch",
+    "release:automate:minor": "node scripts/release-automate.js minor",
+    "release:automate:major": "node scripts/release-automate.js major",
+    "prepublish:gate": "npm run compile && npm run lint && npm test --silent && npm run test:p0 && node scripts/check-release.js",
+    "release:check": "npm run prepublish:gate && npm run test:runtime",
     "release:package": "npm run release:check && npx --yes @vscode/vsce package --no-yarn"
   },
   "devDependencies": {

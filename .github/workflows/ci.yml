@@ -7,8 +7,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      NODE_VERSION: 20.11.1
+      VSCODE_TEST_VERSION: 1.109.3
+      RUNTIME_SMOKE_MAX_ATTEMPTS: 2
 
     steps:
       - name: Checkout
@@ -17,7 +25,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install
@@ -26,11 +34,33 @@ jobs:
       - name: Compile
         run: npm run -s compile
 
+      - name: Lint
+        run: npm run -s lint
+
       - name: Unit + Smoke
         run: npm test --silent
 
       - name: P0 scenarios
         run: npm run -s test:p0
 
+      - name: Release checks (semver/changelog/readme/assets)
+        run: node scripts/check-release.js
+
+      - name: VS Code runtime smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run -s test:runtime
+
+      - name: VS Code runtime smoke (macOS)
+        if: runner.os == 'macOS'
+        run: npm run -s test:runtime
+
       - name: Perf budget
         run: node --test test/perf-budget.test.js
+
+      - name: Upload runtime flaky report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-flaky-report-${{ matrix.os }}
+          path: .artifacts/runtime-flaky-report.json
+          if-no-files-found: warn

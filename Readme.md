@@ -4,9 +4,11 @@
 
 # Android Tools for VS Code
 
-Run, debug, and control Android apps in VS Code without Android Studio.
+Android extension for VS Code focused on daily Android development: **ADB**, **emulator/device management**, **Logcat**, **Gradle run/debug**, **APK install**, and **XML/Layout tools**.
 
 Android Tools is a lightweight VS Code extension that brings the most used Android Studio workflows into VS Code. It is not a replacement for Android Studio.
+
+Keywords: Android VS Code extension, ADB, Emulator Manager, Device Manager, Logcat, Gradle, Kotlin, Java, APK, XML Preview.
 
 ![Android Project View](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/file-system.gif)
 
@@ -26,6 +28,11 @@ ConstraintSet Snippet Generator:
 1. Install Android SDK and Emulator tools.
 2. Run `Android: Start Emulator`.
 3. Run `Android: Run App on Emulator`.
+
+Marketplace and Support
+- Install from VS Code Marketplace (search: `Android Tools for VS Code`).
+- Repository: [GitHub](https://github.com/LevKosyk/Android-Tools)
+- Issues / feedback: [GitHub Issues](https://github.com/LevKosyk/Android-Tools/issues)
 
 
 ## Key Features
@@ -76,7 +83,7 @@ Profiler (Lite)
 
 Run Panel
 - Select module, device, and build variant
-- Build, install, run, clean
+- Build, install, run, clean, and release-quality gate
 - Stop action near Run
 - Recent run history + quick re-run
 - History search/filter (all / current module / current device)
@@ -90,11 +97,19 @@ Run Panel
 - Gradle diagnostics classifier v2 (better top-error reason + targeted quick fixes)
 - Cancel active long-running operation from Command Palette
 - Smart empty-state hints with one-click quick fixes (module/device/workspace/SDK)
-- Built-in Quick Actions row (Run Selected / Stop Selected / Logcat This App / Health Wizard)
+- Built-in Quick Actions row (Run Selected / Stop Selected / Logcat This App / Health Wizard / Release Gate)
+- Unified failure block format: `Reason` + `Why` + `Suggested` + one-click fix actions
 
 First-Run Health Wizard
-- One-shot startup check for SDK, Java/Kotlin, modules, and devices
-- Quick actions to auto-fix common setup issues
+- Success-driven setup check (SDK, Java/Kotlin, modules, devices)
+- Health score feedback and focused quick fixes for failed checks
+- `Fix All Detected Issues` option before first run
+
+Onboarding v2
+- Checklist UI for SDK, JDK, modules, and devices
+- One-click per-item fixes + `Fix All Detected Issues`
+- Direct handoff to Run Panel
+- Progress bar + health score
 
 Device Selector Bar
 - Persistent status bar controls for device, module, and variant
@@ -113,15 +128,47 @@ Gradle Build Output Panel
 - Dedicated Gradle output channel
 - Error parsing with file/line links
 
+Gradle Intelligence
+- Dependency conflict detector with safe force-version suggestions
+- Build scan-lite with slow task ranking (from Gradle timing output)
+
 Problems View
 - Collects failed Run/Build/Install/Clean actions
 - One-click fix actions from failure context
 - Jump to source location when file/line is available
 - Run Failure Report command with top-10 grouped failure reasons
+- Crash/Failure Insights panel: top errors for last 7 days, frequency, and auto-fix hit rate
+- Error Knowledge Base: top errors with root cause, auto-fix/manual-fix, and direct file links
+- Error taxonomy v2: unified normalized reason IDs across diagnostics/reporting/panels
+- Actionable error prompts in extension flows (quick fix actions + suggestion sheet)
+
+Team Features
+- Export/import project config via `.vscode/android-tools.json`
+- Share launch profiles, matrix presets, logcat presets, and key androidToolkit settings
+- Versioned project config schema with auto-migration (`schemaVersion: 2`)
 
 Matrix Runs
 - Install matrix retries failed devices automatically for recoverable ADB failures
 - Matrix output includes attempt counts
+- Device Lab mode: matrix `Install / Run / Smoke / Tests`
+- Flaky test history by device and runner (dashboard summary)
+
+Stability SLO Dashboard
+- Run success rate
+- Median build/install duration
+- Crash-free sessions (session health tracking)
+- Command budget (median/p95/breach count for key command latency SLOs)
+- Startup Profiler panel for activation breakdown (top slow init phases)
+
+Performance Pass
+- Lazy open for heavy UI panels (on-demand import)
+- Debounced auto-sync tick to avoid overlap
+- Cached read-only Gradle scans for faster repeated analysis
+- Unified throttled background scheduler for polling tasks
+- Smart cache invalidation on Gradle/project file changes and device topology changes
+- Crash-safe lightweight panel state snapshots (restores after extension host restart)
+- Progressive webview rendering (loading skeletons before heavy lists/tables)
+- Action replay diagnostics report for reproduce-bug bundles
 
 Build Variants
 - Pick debug, release, and product flavors
@@ -133,6 +180,8 @@ Launch Profiles
 Run Configurations
 - Per module and variant configs
 - Pre-run tasks, env vars, and Gradle arguments
+- Run/Debug Profiles v2 panel with create/run/debug/duplicate/delete
+- Inline profile edit directly in panel (without reopening dialogs)
 
 APK Analyzer (Lite)
 - Total APK size
@@ -248,6 +297,11 @@ New Project Wizard
 - Activity, manifest, resources
 - Gradle files and wrapper when available
 
+Template Gallery
+- Visual template picker for Android project starters
+- Quick create flow for Views and Compose templates
+- Preview cards + capability summary per template
+
 ## How To Use (New Features)
 ### 1) First Launch Setup
 1. Run `Android: First-Run Health Wizard`.
@@ -325,12 +379,22 @@ Shortcut:
 | Android: Run App on Device | Build, install, run on device |
 | Android: Open Run Panel | Build, install, run, clean in one panel |
 | Android: First-Run Health Wizard | Guided setup checks + quick fixes |
+| Android: Open Onboarding v2 | Visual onboarding checklist with one-click fixes |
+| Android: Open Template Gallery | Open visual starter template gallery |
 | Android: Run Selected (Quick) | Alias for running selected target |
 | Android: Stop Selected (Quick) | Alias for stopping selected app |
 | Android: Logcat This App (Quick) | Open Logcat and jump to app-focused flow |
 | Android: Cancel Active Operation | Request cancellation for current long action |
 | Android: Collect Diagnostics Snapshot | Export environment/device/module diagnostics to markdown |
 | Android: Open Run Failure Report | Show top grouped run/build/install failure reasons |
+| Android: Open Startup Profiler | Show activation phase breakdown and top startup costs |
+| Android: Open Action Replay Report | Export recent actions with args and latency for repro |
+| Android: Run Release Quality Gate | Run compile/lint/tests/release checks before publish |
+| Android: Open Failure Insights Panel | Weekly top failures + auto-fix hit rate dashboard |
+| Android: Open Stability SLO Dashboard | Data-driven stability metrics (run success, medians, session health) |
+| Android: Open Error Knowledge Base | Top errors with why/fixes/docs/file hints |
+| Android: Export Team Project Config | Save shared project config to `.vscode/android-tools.json` |
+| Android: Import Team Project Config | Apply shared project config from `.vscode/android-tools.json` |
 | Android: Select Build Variant | Choose debug/release/flavor |
 | Android: Gradle Assemble Debug | Assemble debug variant |
 | Android: Gradle Install Debug | Install debug via Gradle |
@@ -348,7 +412,10 @@ Shortcut:
 | Android: Undo Last Project Action | Undo last move/delete in project view |
 | Android: Create Run Configuration | Create a run configuration |
 | Android: Run Run Configuration | Run a saved configuration |
+| Android: Debug Run Configuration | Run saved configuration and attach debugger |
+| Android: Duplicate Run Configuration | Duplicate an existing run configuration |
 | Android: Delete Run Configuration | Delete a configuration |
+| Android: Open Run/Debug Profiles v2 | Open panel to manage run/debug profiles |
 | Android: APK Analyzer | Analyze APK size |
 | Android: Compare APKs | Compare two APKs |
 | Android: App Inspection | Inspect running apps |
@@ -357,6 +424,7 @@ Shortcut:
 | Android: Debug Panel | Open integrated debug panel |
 | Android: Build Cache Inspector | Show build cache stats and issues |
 | Android: Dependency Insight | Run Gradle dependency insight |
+| Android: Open Gradle Intelligence | Conflict detector + build scan-lite slow task view |
 | Android: Signing Wizard | Generate keystore and setup signing |
 | Android: Release Flow Wizard | Guided variant/build/sign/install release flow |
 | Android: Build Signed APK | Build release APK |
@@ -399,7 +467,7 @@ Shortcut:
 | Android: Install APK | Install an APK |
 | Android: Install APK on Multiple Devices | Install APK on multiple devices |
 | Android: Device Matrix Run | Run app/tests on selected devices |
-| Android: Matrix Dashboard | Unified matrix UI with saved device presets |
+| Android: Matrix Dashboard | Unified matrix UI with saved presets + flaky history view |
 | Android: Gradle Doctor | Check and auto-fix Gradle environment issues |
 | Android: Save Emulator Snapshot | Save current emulator snapshot |
 | Android: Load Emulator Snapshot | Load emulator snapshot |
@@ -477,8 +545,39 @@ MIT
 
 ## CI Quality Gates
 - GitHub Actions CI runs on every push/PR.
-- Compile + unit/smoke + P0 tests.
+- Deterministic runtime:
+ - pinned Node version in CI
+ - pinned VS Code test runtime version
+- OS matrix for runtime confidence: Linux + macOS.
+- Compile + lint + unit/smoke + P0 tests.
+- VS Code Extension Host runtime smoke:
+ - open run panel
+ - select device (if available)
+ - matrix dashboard dry-run readiness
+ - export/import team config
+- Flake guard:
+ - runtime smoke retries only known flaky failures (network/xvfb transient)
+ - writes `.artifacts/runtime-flaky-report.json`
+ - uploads flaky report as CI artifact
+- Release validation:
+ - semver check
+ - changelog version section check
+ - README local links and screenshots check
+ - license file check
+ - extension bundle size check
 - Performance budgets:
  - Gradle variant parser hot-path latency budget.
  - Extension bundle size budget.
 
+Local prepublish gate:
+- `npm run -s prepublish:gate`
+
+Release automation:
+- `npm run -s release:automate` (patch)
+- `npm run -s release:automate:minor`
+- `npm run -s release:automate:major`
+
+## Release Artifacts
+- Hard release checklist: `RELEASE_CHECKLIST.md`
+- Changelog: `CHANGELOG.md`
+- Release notes template: `RELEASE_NOTES_TEMPLATE.md`

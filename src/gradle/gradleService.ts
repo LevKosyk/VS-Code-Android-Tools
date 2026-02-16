@@ -19,6 +19,7 @@ type GradleTaskCacheEntry = {
 const GRADLE_TASK_CACHE_TTL_MS = 10_000;
 const GRADLE_TASK_STALE_TTL_MS = 60_000;
 const gradleTaskCache = new Map<string, GradleTaskCacheEntry>();
+const gradleResultCache = new Map<string, { at: number; result: Awaited<ReturnType<typeof runGradleTaskWithResult>> }>();
 
 export function getGradleCommand(workspaceRoot: string): string {
   const wrapper = process.platform === 'win32' ? 'gradlew.bat' : 'gradlew';
@@ -56,6 +57,22 @@ export async function runGradleTaskWithResult(
     timeout: 300_000,
     env,
   });
+}
+
+export async function runGradleTaskWithResultCached(
+  workspaceRoot: string,
+  task: string,
+  extraArgs: string[] = [],
+  ttlMs = 8_000
+) {
+  const cacheKey = `${path.resolve(workspaceRoot)}::${task}::${extraArgs.join(' ')}`;
+  const cached = gradleResultCache.get(cacheKey);
+  if (cached && Date.now() - cached.at <= ttlMs) {
+    return cached.result;
+  }
+  const result = await runGradleTaskWithResult(workspaceRoot, task, extraArgs);
+  gradleResultCache.set(cacheKey, { at: Date.now(), result });
+  return result;
 }
 
 export async function listGradleTasks(workspaceRoot: string): Promise<GradleTaskInfo[]> {
@@ -134,9 +151,16 @@ async function fetchGradleTasks(workspaceRoot: string): Promise<GradleTaskInfo[]
 export function invalidateGradleTaskCache(workspaceRoot?: string): void {
   if (!workspaceRoot) {
     gradleTaskCache.clear();
+    gradleResultCache.clear();
     return;
   }
-  gradleTaskCache.delete(path.resolve(workspaceRoot));
+  const resolved = path.resolve(workspaceRoot);
+  gradleTaskCache.delete(resolved);
+  for (const key of gradleResultCache.keys()) {
+    if (key.startsWith(`${resolved}::`)) {
+      gradleResultCache.delete(key);
+    }
+  }
 }
 
 export function listVariantsFromTasks(tasks: GradleTaskInfo[], moduleName: string): string[] {

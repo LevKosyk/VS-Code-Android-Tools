@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as fs from 'fs';
 import { listGradleTasks } from '../gradle/gradleService';
 import { findApplicationModules } from '../core/androidProject';
 import { showError, showInfo, showWarning } from '../ui/notifications';
+import { readProjectConfig, writeProjectConfig } from '../team/projectConfigStore';
 
 export interface LaunchProfile {
   name: string;
@@ -13,36 +12,15 @@ export interface LaunchProfile {
   task?: string;
 }
 
-interface LaunchProfilesFile {
-  launchProfiles: LaunchProfile[];
-}
-
-function getConfigPath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.vscode', 'android-tools.json');
-}
-
 export function readLaunchProfiles(workspaceRoot: string): LaunchProfile[] {
-  const configPath = getConfigPath(workspaceRoot);
-  if (!fs.existsSync(configPath)) {
-    return [];
-  }
-  try {
-    const content = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(content) as LaunchProfilesFile;
-    return parsed.launchProfiles || [];
-  } catch {
-    return [];
-  }
+  const { config } = readProjectConfig(workspaceRoot);
+  return config.launchProfiles || [];
 }
 
 export function writeLaunchProfiles(workspaceRoot: string, profiles: LaunchProfile[]): void {
-  const configPath = getConfigPath(workspaceRoot);
-  const folder = path.dirname(configPath);
-  if (!fs.existsSync(folder)) {
-    fs.mkdirSync(folder, { recursive: true });
-  }
-  const payload: LaunchProfilesFile = { launchProfiles: profiles };
-  fs.writeFileSync(configPath, JSON.stringify(payload, null, 2));
+  const { config } = readProjectConfig(workspaceRoot);
+  config.launchProfiles = profiles;
+  writeProjectConfig(workspaceRoot, config);
 }
 
 export async function createLaunchProfileFlow(

@@ -56,6 +56,51 @@ export function showError(message: string): void {
     vscode.window.setStatusBarMessage(`Android Tools error: ${message}`, 8000);
   }
 }
+export type ActionableErrorAction = {
+  label: string;
+  action: () => Promise<void> | void;
+};
+export type ActionableErrorPayload = {
+  title: string;
+  why?: string;
+  suggestions?: string[];
+  actions?: ActionableErrorAction[];
+};
+export async function showActionableError(payload: ActionableErrorPayload): Promise<void> {
+  const why = payload.why?.trim();
+  const suggestions = (payload.suggestions || []).filter(Boolean).map(s => s.trim()).filter(Boolean);
+  const compactMessage = [payload.title.trim(), why ? `Why: ${why}` : ''].filter(Boolean).join(' | ');
+  logLine('ERROR', compactMessage);
+  suggestions.forEach(s => logLine('ERROR', `Suggestion: ${s}`));
+
+  if (!shouldPopupError()) {
+    vscode.window.setStatusBarMessage(`Android Tools error: ${payload.title}`, 8000);
+    return;
+  }
+  if (!canShow('error', compactMessage)) {
+    return;
+  }
+
+  const actionEntries = (payload.actions || []).slice(0, 2);
+  const actionLabels = actionEntries.map(a => a.label);
+  const secondaryAction = suggestions.length > 0 ? 'Show Suggestions' : '';
+  const picked = await vscode.window.showErrorMessage(
+    payload.title,
+    ...[...actionLabels, secondaryAction].filter(Boolean)
+  );
+  const idx = picked ? actionLabels.indexOf(picked) : -1;
+  if (idx >= 0) {
+    await actionEntries[idx].action();
+    return;
+  }
+  if (picked === secondaryAction) {
+    const doc = await vscode.workspace.openTextDocument({
+      content: ['# Android Tools Fix Suggestions', '', ...suggestions.map(s => `- ${s}`)].join('\n'),
+      language: 'markdown',
+    });
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+}
 export function showToolkitError(error: AndroidToolsError): void {
   const fullMessage = error.toNotification();
   logLine('ERROR', fullMessage);

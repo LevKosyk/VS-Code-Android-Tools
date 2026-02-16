@@ -187,8 +187,10 @@ export class RunPanel {
         const deviceId = String(message.deviceId || '');
         const result = await this.handlers.applyFix(fixId, moduleName, deviceId);
         this.postMessage({ type: 'result', action: 'fix', ...result });
-        const devices = await this.handlers.getDevices();
-        const modules = await this.handlers.getModules();
+        const [devices, modules] = await Promise.all([
+          this.handlers.getDevices(),
+          this.handlers.getModules(),
+        ]);
         this.postMessage({ type: 'devices', devices });
         this.postMessage({ type: 'modules', modules });
         break;
@@ -203,6 +205,16 @@ export class RunPanel {
       }
       case 'openGradleOutput': {
         await vscode.commands.executeCommand('android-toolkit.showGradleOutput');
+        break;
+      }
+      case 'releaseQualityGate': {
+        await vscode.commands.executeCommand('android-toolkit.releaseQualityGate');
+        this.postMessage({
+          type: 'result',
+          action: 'releaseQualityGate',
+          success: true,
+          message: 'Release quality gate finished.',
+        });
         break;
       }
       case 'openErrorLocation': {
@@ -221,10 +233,12 @@ export class RunPanel {
         break;
       }
       case 'refresh': {
-        const devices = await this.handlers.getDevices();
-        const modules = await this.handlers.getModules();
-        const history = await this.handlers.getHistory();
-        const health = await this.handlers.getHealth();
+        const [devices, modules, history, health] = await Promise.all([
+          this.handlers.getDevices(),
+          this.handlers.getModules(),
+          this.handlers.getHistory(),
+          this.handlers.getHealth(),
+        ]);
         this.postMessage({ type: 'devices', devices });
         this.postMessage({ type: 'modules', modules });
         this.postMessage({ type: 'history', history });
@@ -290,12 +304,16 @@ export class RunPanel {
     button { background: var(--btn-bg); color: var(--btn-fg); border: none; cursor: pointer; font-weight: 600; }
     button:hover { opacity: 0.92; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 2px solid var(--vscode-focusBorder);
+      outline-offset: 1px;
+    }
     button.secondary { background: transparent; border: 1px solid var(--border); color: var(--fg); }
     .status { color: var(--muted); margin-top: 8px; border-radius: 8px; border: 1px solid var(--border); padding: 8px 10px; min-height: 36px; display: flex; align-items: center; }
     .status.loading { color: #0369a1; border-color: #7dd3fc; background: #e0f2fe44; }
     .status.success { color: #166534; border-color: #86efac; background: #dcfce744; }
     .status.error { color: #b91c1c; border-color: #fca5a5; background: #fee2e244; font-weight: 600; }
-    .actions-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .actions-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
     .actions-row button { width: 100%; }
     .preset-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .pinned-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -330,7 +348,7 @@ export class RunPanel {
     .error-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
     .fix-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     .fix-row button { width: auto; }
-    .quick-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .quick-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .quick-row button { width: 100%; }
     .hint-box { border: 1px dashed var(--border); border-radius: 8px; padding: 8px; margin-top: 8px; display: none; }
     .hint-box.visible { display: block; }
@@ -339,6 +357,7 @@ export class RunPanel {
     @media (max-width: 980px) {
       .actions-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .preset-row { grid-template-columns: 1fr; }
+      .quick-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
   </style>
 </head>
@@ -346,31 +365,32 @@ export class RunPanel {
   <div class="card">
     <div class="title">Target</div>
     <div class="row">
-      <div class="col" style="flex:1"><label>Module</label><select id="moduleSelect"></select></div>
-      <div class="col" style="flex:1"><label>Device</label><select id="deviceSelect"></select></div>
-      <div class="col" style="flex:1"><label>Variant</label><select id="variantSelect"></select></div>
-      <div class="col" style="flex:1"><label>Flavor</label><select id="flavorSelect"></select></div>
-      <div class="col" style="flex:1"><label>Build Type</label><select id="buildTypeSelect"></select></div>
-      <button id="refreshBtn" class="secondary">Refresh</button>
+      <div class="col" style="flex:1"><label>Module</label><select id="moduleSelect" aria-label="Module selector"></select></div>
+      <div class="col" style="flex:1"><label>Device</label><select id="deviceSelect" aria-label="Device selector"></select></div>
+      <div class="col" style="flex:1"><label>Variant</label><select id="variantSelect" aria-label="Variant selector"></select></div>
+      <div class="col" style="flex:1"><label>Flavor</label><select id="flavorSelect" aria-label="Flavor selector"></select></div>
+      <div class="col" style="flex:1"><label>Build Type</label><select id="buildTypeSelect" aria-label="Build type selector"></select></div>
+      <button id="refreshBtn" class="secondary" aria-label="Refresh run panel">Refresh</button>
     </div>
   </div>
 
   <div class="card">
     <div class="title">Actions</div>
     <div class="actions-row">
-      <button id="buildBtn">Build</button>
-      <button id="installBtn">Install</button>
-      <button id="runBtn">Run</button>
-      <button id="stopBtn" class="secondary">Stop</button>
-      <button id="cleanBtn" class="secondary">Clean</button>
+      <button id="buildBtn" aria-label="Build selected variant">Build</button>
+      <button id="installBtn" aria-label="Install app on selected device">Install</button>
+      <button id="runBtn" aria-label="Run app on selected device">Run</button>
+      <button id="stopBtn" class="secondary" aria-label="Stop app on selected device">Stop</button>
+      <button id="cleanBtn" class="secondary" aria-label="Clean project">Clean</button>
+      <button id="releaseGateBtn" class="secondary" aria-label="Run release quality gate">Release Gate</button>
     </div>
-    <div id="status" class="status">Ready</div>
+    <div id="status" class="status" role="status" aria-live="polite">Ready</div>
     <div id="hintBox" class="hint-box">
       <div id="hintTitle" class="hint-title"></div>
       <div id="hintActions" class="hint-actions"></div>
     </div>
     <div id="health" class="health">Runtime health: checking...</div>
-    <div id="errorBox" class="error-box">
+    <div id="errorBox" class="error-box" role="alert" aria-live="assertive">
       <div class="error-title">Gradle Error</div>
       <div id="errorText" class="error-text"></div>
       <div class="error-actions">
@@ -401,6 +421,7 @@ export class RunPanel {
       <button id="qaStopBtn" class="secondary">Stop Selected</button>
       <button id="qaLogcatBtn" class="secondary">Logcat This App</button>
       <button id="qaHealthBtn" class="secondary">Health Wizard</button>
+      <button id="qaReleaseGateBtn" class="secondary">Release Gate</button>
     </div>
   </div>
 
@@ -447,6 +468,7 @@ export class RunPanel {
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const cleanBtn = document.getElementById('cleanBtn');
+    const releaseGateBtn = document.getElementById('releaseGateBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const rerunBtn = document.getElementById('rerunBtn');
     const pinDebugEmuBtn = document.getElementById('pinDebugEmuBtn');
@@ -455,6 +477,7 @@ export class RunPanel {
     const qaStopBtn = document.getElementById('qaStopBtn');
     const qaLogcatBtn = document.getElementById('qaLogcatBtn');
     const qaHealthBtn = document.getElementById('qaHealthBtn');
+    const qaReleaseGateBtn = document.getElementById('qaReleaseGateBtn');
 
     let isBusy = false;
     let selectedHistoryId = '';
@@ -471,10 +494,36 @@ export class RunPanel {
     } else {
       pinnedPresetIds = ['debug-emulator'];
     }
+    let restore = {
+      module: persisted && typeof persisted.module === 'string' ? persisted.module : '',
+      device: persisted && typeof persisted.device === 'string' ? persisted.device : '',
+      variant: persisted && typeof persisted.variant === 'string' ? persisted.variant : '',
+      flavor: persisted && typeof persisted.flavor === 'string' ? persisted.flavor : '',
+      buildType: persisted && typeof persisted.buildType === 'string' ? persisted.buildType : '',
+      historySearch: persisted && typeof persisted.historySearch === 'string' ? persisted.historySearch : '',
+      historyFilter: persisted && typeof persisted.historyFilter === 'string' ? persisted.historyFilter : 'all',
+      selectedHistoryId: persisted && typeof persisted.selectedHistoryId === 'string' ? persisted.selectedHistoryId : '',
+    };
+    if (restore.historySearch) {
+      historySearch.value = restore.historySearch;
+    }
+    if (restore.historyFilter) {
+      historyFilter.value = restore.historyFilter;
+    }
 
     function persistPanelState() {
       if (vscode.setState) {
-        vscode.setState({ pinnedPresetIds });
+        vscode.setState({
+          pinnedPresetIds,
+          module: moduleSelect.value,
+          device: deviceSelect.value,
+          variant: variantSelect.value,
+          flavor: flavorSelect.value,
+          buildType: buildTypeSelect.value,
+          historySearch: historySearch.value,
+          historyFilter: historyFilter.value,
+          selectedHistoryId,
+        });
       }
     }
 
@@ -539,6 +588,12 @@ export class RunPanel {
       runBtn.disabled = isBusy || !hasModule || !hasDevice;
       refreshBtn.disabled = isBusy;
       rerunBtn.disabled = isBusy || !selectedHistoryId;
+      releaseGateBtn.disabled = isBusy;
+      qaRunBtn.disabled = isBusy || !hasModule || !hasDevice;
+      qaStopBtn.disabled = isBusy || !hasModule || !hasDevice;
+      qaLogcatBtn.disabled = isBusy || !hasModule;
+      qaHealthBtn.disabled = isBusy;
+      qaReleaseGateBtn.disabled = isBusy;
       updateEmptyHints();
     }
 
@@ -648,6 +703,7 @@ export class RunPanel {
         empty.textContent = historyItems.length ? 'No matches' : 'No recent runs';
         historyList.appendChild(empty);
         selectedHistoryId = '';
+        persistPanelState();
         updateActionButtons();
         return;
       }
@@ -668,6 +724,7 @@ export class RunPanel {
       if (!filtered.some(h => h.id === selectedHistoryId)) {
         selectedHistoryId = filtered[0].id;
       }
+      persistPanelState();
       updateActionButtons();
     }
 
@@ -708,6 +765,11 @@ export class RunPanel {
       vscode.postMessage({ type: 'clean' });
       setStatus('Cleaning project...', 'loading');
     });
+    releaseGateBtn.addEventListener('click', () => {
+      setBusy(true);
+      vscode.postMessage({ type: 'releaseQualityGate' });
+      setStatus('Running release quality gate...', 'loading');
+    });
 
     document.getElementById('presetDebugEmuBtn').addEventListener('click', () => runPreset('debug-emulator'));
     document.getElementById('presetReleaseDeviceBtn').addEventListener('click', () => runPreset('release-device'));
@@ -740,26 +802,44 @@ export class RunPanel {
       vscode.postMessage({ type: 'quickAction', actionId: 'health-wizard', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
       setStatus('Opening health wizard...', 'loading');
     });
+    qaReleaseGateBtn.addEventListener('click', () => {
+      setBusy(true);
+      vscode.postMessage({ type: 'releaseQualityGate' });
+      setStatus('Running release quality gate...', 'loading');
+    });
 
     moduleSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'getVariants', moduleName: moduleSelect.value });
+      persistPanelState();
       updateActionButtons();
     });
-    deviceSelect.addEventListener('change', updateActionButtons);
+    deviceSelect.addEventListener('change', () => {
+      persistPanelState();
+      updateActionButtons();
+    });
     variantSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setVariant', moduleName: moduleSelect.value, variant: variantSelect.value });
+      persistPanelState();
       updateBuildButtonLabel();
     });
     flavorSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setFlavor', moduleName: moduleSelect.value, flavor: flavorSelect.value });
+      persistPanelState();
       updateVariantFromSelections();
     });
     buildTypeSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setBuildType', moduleName: moduleSelect.value, buildType: buildTypeSelect.value });
+      persistPanelState();
       updateVariantFromSelections();
     });
-    historySearch.addEventListener('input', () => renderHistory(historyItems));
-    historyFilter.addEventListener('change', () => renderHistory(historyItems));
+    historySearch.addEventListener('input', () => {
+      persistPanelState();
+      renderHistory(historyItems);
+    });
+    historyFilter.addEventListener('change', () => {
+      persistPanelState();
+      renderHistory(historyItems);
+    });
     window.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
       const typingContext = tag === 'input' || tag === 'textarea' || tag === 'select' || (document.activeElement && document.activeElement.isContentEditable);
@@ -814,7 +894,15 @@ export class RunPanel {
             opt.textContent = d.label;
             deviceSelect.appendChild(opt);
           });
+          if (restore.device) {
+            const exists = Array.from(deviceSelect.options).some(o => o.value === restore.device);
+            if (exists) {
+              deviceSelect.value = restore.device;
+            }
+            restore.device = '';
+          }
         }
+        persistPanelState();
         updateActionButtons();
       }
       if (message.type === 'modules') {
@@ -831,10 +919,18 @@ export class RunPanel {
             opt.textContent = m;
             moduleSelect.appendChild(opt);
           });
+          if (restore.module) {
+            const exists = Array.from(moduleSelect.options).some(o => o.value === restore.module);
+            if (exists) {
+              moduleSelect.value = restore.module;
+            }
+            restore.module = '';
+          }
         }
         if (moduleSelect.value) {
           vscode.postMessage({ type: 'getVariants', moduleName: moduleSelect.value });
         }
+        persistPanelState();
         updateActionButtons();
       }
       if (message.type === 'variants') {
@@ -848,6 +944,13 @@ export class RunPanel {
         if (message.selected) {
           variantSelect.value = message.selected;
         }
+        if (restore.variant) {
+          const exists = Array.from(variantSelect.options).some(o => o.value === restore.variant);
+          if (exists) {
+            variantSelect.value = restore.variant;
+          }
+          restore.variant = '';
+        }
 
         flavorSelect.innerHTML = '';
         (message.flavors || []).forEach(f => {
@@ -858,6 +961,13 @@ export class RunPanel {
         });
         if (message.selectedFlavor) {
           flavorSelect.value = message.selectedFlavor;
+        }
+        if (restore.flavor) {
+          const exists = Array.from(flavorSelect.options).some(o => o.value === restore.flavor);
+          if (exists) {
+            flavorSelect.value = restore.flavor;
+          }
+          restore.flavor = '';
         }
 
         buildTypeSelect.innerHTML = '';
@@ -870,8 +980,16 @@ export class RunPanel {
         if (message.selectedBuildType) {
           buildTypeSelect.value = message.selectedBuildType;
         }
+        if (restore.buildType) {
+          const exists = Array.from(buildTypeSelect.options).some(o => o.value === restore.buildType);
+          if (exists) {
+            buildTypeSelect.value = restore.buildType;
+          }
+          restore.buildType = '';
+        }
 
         updateBuildButtonLabel();
+        persistPanelState();
         updateActionButtons();
       }
       if (message.type === 'history') {
@@ -891,10 +1009,11 @@ export class RunPanel {
       }
     });
 
-    vscode.postMessage({ type: 'getDevices' });
-    vscode.postMessage({ type: 'getModules' });
-    vscode.postMessage({ type: 'getHistory' });
+    moduleSelect.innerHTML = '<option>Loading modules...</option>';
+    deviceSelect.innerHTML = '<option>Loading devices...</option>';
+    historyList.innerHTML = '<div class="history-item">Loading recent runs...</div>';
     vscode.postMessage({ type: 'refresh' });
+    setInterval(persistPanelState, 2000);
     updateBuildButtonLabel();
     updateActionButtons();
     renderPinnedPresets();

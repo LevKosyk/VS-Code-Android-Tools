@@ -1,15 +1,6 @@
-export type GradleFailureTag =
-  | 'buildToolsVersion'
-  | 'sdkMissing'
-  | 'dependencyResolution'
-  | 'jdkMismatch'
-  | 'kotlinK2'
-  | 'signingConfig'
-  | 'namespaceMissing'
-  | 'manifestMerge'
-  | 'taskNotFound'
-  | 'daemonIssue'
-  | 'unknown';
+import { ErrorReason } from './errorTaxonomy';
+
+export type GradleFailureTag = ErrorReason;
 
 export interface GradleFailureClassification {
   summary: string;
@@ -19,7 +10,7 @@ export interface GradleFailureClassification {
 export interface RunFailureRecord {
   action: string;
   message: string;
-  reason: string;
+  reason: ErrorReason;
   timestamp: number;
 }
 
@@ -49,7 +40,7 @@ export function classifyGradleFailure(raw: string): GradleFailureClassification 
     outTags.add('dependencyResolution');
   }
   if (/kotlin language server|kotlincoreenvironment|illegalargumentexception:\s*25\.0\.1/i.test(all)) {
-    outTags.add('kotlinK2');
+    outTags.add('kotlinRuntime');
     outTags.add('jdkMismatch');
   }
   if (/signingconfig|keystore|keystore was tampered|storefile|key alias/i.test(all)) {
