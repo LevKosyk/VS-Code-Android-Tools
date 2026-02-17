@@ -3119,14 +3119,19 @@ async function runCiSmoke(context: vscode.ExtensionContext): Promise<void> {
   await vscode.commands.executeCommand('android-toolkit.openRunPanel');
   output.appendLine('[OK] Run panel opened');
 
-  const online = (await listDevicesDetailed()).filter(d => d.status === 'online');
-  output.appendLine(`[INFO] Online devices: ${online.length}`);
-  if (online.length > 0) {
-    const first = online[0];
-    await setSelectedDeviceId(first.id, `${first.id} (${first.type})`);
-    output.appendLine(`[OK] Selected device: ${first.id}`);
-  } else {
-    output.appendLine('[INFO] No online devices available; skipping device selection');
+  try {
+    const online = (await listDevicesDetailed()).filter(d => d.status === 'online');
+    output.appendLine(`[INFO] Online devices: ${online.length}`);
+    if (online.length > 0) {
+      const first = online[0];
+      await setSelectedDeviceId(first.id, `${first.id} (${first.type})`);
+      output.appendLine(`[OK] Selected device: ${first.id}`);
+    } else {
+      output.appendLine('[INFO] No online devices available; skipping device selection');
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    output.appendLine(`[WARN] Device discovery skipped: ${msg}`);
   }
 
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
