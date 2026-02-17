@@ -14,7 +14,7 @@ test('webview snapshot: run panel critical UX markers', () => {
     'role="alert"',
     'aria-label="Module selector"',
     'historyList.innerHTML = \'<div class="history-item">Loading recent runs...</div>\'',
-    'setInterval(persistPanelState, 2000);',
+    "vscode.postMessage({ type: 'getTimeline' });",
   ];
   markers.forEach(m => assert.equal(src.includes(m), true, `Missing marker in runPanel: ${m}`));
 });
@@ -25,7 +25,7 @@ test('webview snapshot: matrix panel progressive/state markers', () => {
     'devicesEl.textContent = \'Loading devices...\'',
     'history.textContent = \'Loading flaky history...\'',
     'const persisted = vscode.getState ? (vscode.getState() || {}) : {};',
-    'setInterval(persistState, 2500);',
+    "window.addEventListener('keydown', (e) => {",
     'role="status"',
   ];
   markers.forEach(m => assert.equal(src.includes(m), true, `Missing marker in matrix panel: ${m}`));
@@ -35,7 +35,7 @@ test('webview snapshot: gradle intelligence progressive/state markers', () => {
   const src = read('src/gradle/gradleIntelligencePanel.ts');
   const markers = [
     'const persisted = vscode.getState ? (vscode.getState() || {}) : {};',
-    'setInterval(persistState, 2500);',
+    "window.addEventListener('keydown', (e) => {",
     'role="status"',
     'Loading… run detector to show results',
   ];

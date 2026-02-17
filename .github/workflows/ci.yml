@@ -57,10 +57,21 @@ jobs:
       - name: Perf budget
         run: node --test test/perf-budget.test.js
 
+      - name: Package extension (dry-run)
+        run: npx --yes @vscode/vsce package --no-yarn --out .artifacts/android-tools.vsix
+
       - name: Upload runtime flaky report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: runtime-flaky-report-${{ matrix.os }}
           path: .artifacts/runtime-flaky-report.json
+          if-no-files-found: warn
+
+      - name: Upload VSIX artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-tools-vsix-${{ matrix.os }}
+          path: .artifacts/android-tools.vsix
           if-no-files-found: warn

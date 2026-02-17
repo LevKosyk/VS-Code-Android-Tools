@@ -8,6 +8,8 @@ export interface ProjectConfigV2 {
   schemaVersion: 2;
   exportedAt?: string;
   androidToolkitSettings?: Record<string, unknown>;
+  ui?: Record<string, unknown>;
+  behavior?: Record<string, unknown>;
   policy?: {
     requiredSettings?: Record<string, unknown>;
     allowedVariants?: string[];
@@ -69,6 +71,8 @@ function migrateToV2(raw: unknown): { config: ProjectConfigV2; migrated: boolean
         schemaVersion: 2,
         exportedAt: raw.exportedAt ? String(raw.exportedAt) : undefined,
         androidToolkitSettings: isObject(raw.androidToolkitSettings) ? raw.androidToolkitSettings : undefined,
+        ui: isObject(raw.ui) ? raw.ui : undefined,
+        behavior: isObject(raw.behavior) ? raw.behavior : undefined,
         policy: isObject(raw.policy) ? raw.policy as ProjectConfigV2['policy'] : undefined,
         launchProfiles: normalizeLaunchProfiles(raw.launchProfiles),
         matrixPresets: Array.isArray(raw.matrixPresets) ? raw.matrixPresets as ProjectConfigV2['matrixPresets'] : undefined,
@@ -87,6 +91,8 @@ function migrateToV2(raw: unknown): { config: ProjectConfigV2; migrated: boolean
         schemaVersion: 2,
         exportedAt: raw.exportedAt ? String(raw.exportedAt) : undefined,
         androidToolkitSettings: isObject(raw.androidToolkitSettings) ? raw.androidToolkitSettings : undefined,
+        ui: isObject(raw.ui) ? raw.ui : undefined,
+        behavior: isObject(raw.behavior) ? raw.behavior : undefined,
         policy: isObject(raw.policy) ? raw.policy as ProjectConfigV2['policy'] : undefined,
         launchProfiles: normalizeLaunchProfiles(raw.launchProfiles),
         matrixPresets: Array.isArray(raw.matrixPresets) ? raw.matrixPresets as ProjectConfigV2['matrixPresets'] : undefined,

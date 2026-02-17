@@ -6,6 +6,7 @@ import { showError, showInfo } from '../ui/notifications';
 import { detectSdk } from '../core/sdkDetector';
 import { execCommand } from '../core/cli';
 import { findApplicationId, findApplicationModules } from '../core/androidProject';
+import { getWebviewThemeStyle } from '../ui/webviewTheme';
 export class LogcatPanel {
   public static currentPanel: LogcatPanel | undefined;
   private static readonly viewType = 'androidLogcat';
@@ -50,6 +51,15 @@ export class LogcatPanel {
     );
     LogcatPanel.currentPanel = new LogcatPanel(panel, extensionUri, context);
     return LogcatPanel.currentPanel;
+  }
+  public async focusDeviceAndFilterApp(deviceId: string): Promise<void> {
+    if (!deviceId) {
+      return;
+    }
+    this.postMessage({ type: 'sessionApplied', session: { deviceId, filter: this.filter } });
+    await this.startStream(deviceId);
+    await new Promise(resolve => setTimeout(resolve, 800));
+    await this.applyOnlyThisApp(deviceId);
   }
   private async handleMessage(message: { type: string; [key: string]: unknown }): Promise<void> {
     const type = typeof message?.type === 'string' ? message.type : '';
@@ -103,6 +113,12 @@ export class LogcatPanel {
           break;
         case 'exportLogs':
           await this.exportLogs(message.entries as string[] | undefined, Boolean(message.onlySelected));
+          break;
+        case 'startEmulator':
+          await vscode.commands.executeCommand('android-toolkit.startEmulator');
+          break;
+        case 'runAppAndFilter':
+          await this.runAppAndFilter(String(message.deviceId || ''));
           break;
         default:
           this.postMessage({ type: 'error', message: `Unsupported Logcat action: ${type || 'unknown'}` });
@@ -257,6 +273,15 @@ export class LogcatPanel {
     await vscode.workspace.fs.writeFile(uri, Buffer.from(payload, 'utf8'));
     showInfo(`Log export saved: ${uri.fsPath}`);
   }
+  private async runAppAndFilter(deviceId: string): Promise<void> {
+    if (!deviceId) {
+      this.postMessage({ type: 'error', message: 'Select a device first.' });
+      return;
+    }
+    await vscode.commands.executeCommand('android-toolkit.runSelectedAlias');
+    await new Promise(resolve => setTimeout(resolve, 2200));
+    await this.applyOnlyThisApp(deviceId);
+  }
   private async sendDeviceList(): Promise<void> {
     try {
       const devices = await listDevices();
@@ -366,6 +391,7 @@ export class LogcatPanel {
     this.panel.webview.postMessage(message);
   }
   private getHtmlContent(): string {
+    const themeVars = getWebviewThemeStyle();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -373,19 +399,18 @@ export class LogcatPanel {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Logcat Viewer</title>
   <style>
+    ${themeVars}
     :root {
       --bg: var(--vscode-editor-background);
       --fg: var(--vscode-editor-foreground);
       --border: var(--vscode-widget-border);
       --input-bg: var(--vscode-input-background);
       --input-fg: var(--vscode-input-foreground);
-      --btn-bg: var(--vscode-button-background);
-      --btn-fg: var(--vscode-button-foreground);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: var(--vscode-font-family);
-      font-size: 13px;
+      font-size: var(--at-font-size, 13px);
       background: var(--bg);
       color: var(--fg);
       height: 100vh;
@@ -394,35 +419,38 @@ export class LogcatPanel {
     }
     .toolbar {
       display: flex;
-      gap: 8px;
-      padding: 8px;
+      gap: var(--at-space-2);
+      padding: var(--at-space-2);
       border-bottom: 1px solid var(--border);
       flex-wrap: wrap;
       align-items: center;
     }
     select, input, button {
       font-family: inherit;
-      font-size: 12px;
-      padding: 4px 8px;
+      font-size: var(--at-type-label);
+      padding: var(--at-control-padding-y, 6px) var(--at-control-padding-x, 8px);
       border: 1px solid var(--border);
-      border-radius: 3px;
+      border-radius: var(--at-radius-sm);
       background: var(--input-bg);
       color: var(--input-fg);
     }
     button {
-      background: var(--btn-bg);
-      color: var(--btn-fg);
       cursor: pointer;
-      border: none;
+      min-height: var(--at-table-row-height, 34px);
+      font-weight: 600;
     }
+    button.btn-primary { background: var(--at-info); color: var(--at-info-contrast); border-color: transparent; }
+    button.btn-secondary { background: transparent; color: var(--fg); }
+    button.btn-tertiary { background: transparent; border-style: dashed; color: var(--vscode-descriptionForeground); font-weight: 500; }
+    button.secondary { background: transparent; color: var(--fg); }
     button:hover { opacity: 0.9; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-stop { background: #d32f2f; }
-    .btn-clear { background: #616161; }
+    .btn-stop { background: var(--at-error); color: var(--at-error-contrast); border-color: transparent; }
+    .btn-clear { background: transparent; color: var(--fg); }
     input[type="text"] { width: 150px; }
     .status {
       margin-left: auto;
-      font-size: 11px;
+      font-size: var(--at-type-helper);
       color: var(--vscode-descriptionForeground);
     }
     .status.running { color: #4caf50; }
@@ -431,12 +459,12 @@ export class LogcatPanel {
       flex: 1;
       overflow-y: auto;
       font-family: var(--vscode-editor-font-family), monospace;
-      font-size: 12px;
-      padding: 4px;
+      font-size: var(--at-type-label);
+      padding: var(--at-space-1);
     }
     .log-line {
       display: flex;
-      padding: 2px 4px;
+      padding: var(--at-space-1);
       border-radius: 2px;
       cursor: pointer;
     }
@@ -466,9 +494,9 @@ export class LogcatPanel {
     <select id="deviceSelect">
       <option value="">Select device...</option>
     </select>
-    <button id="startBtn">Start</button>
+    <button id="startBtn" class="btn-primary">Start</button>
     <button id="stopBtn" class="btn-stop" disabled>Stop</button>
-    <button id="clearBtn" class="btn-clear">Clear</button>
+    <button id="clearBtn" class="btn-clear btn-secondary">Clear</button>
     <select id="levelSelect">
       <option value="V">Verbose+</option>
       <option value="D">Debug+</option>
@@ -482,26 +510,26 @@ export class LogcatPanel {
       <option value="">Presets</option>
     </select>
     <input type="text" id="presetName" placeholder="Preset name">
-    <button id="savePresetBtn">Save</button>
-    <button id="pinPresetBtn">Pin</button>
-    <button id="deletePresetBtn">Delete</button>
+    <button id="savePresetBtn" class="btn-secondary">Save</button>
+    <button id="pinPresetBtn" class="btn-tertiary">Pin</button>
+    <button id="deletePresetBtn" class="btn-tertiary">Delete</button>
     <select id="sessionSelect">
       <option value="">Sessions</option>
     </select>
     <input type="text" id="sessionName" placeholder="Session name">
-    <button id="saveSessionBtn">Save Session</button>
-    <button id="runSessionBtn">Run Session</button>
-    <button id="errorsBtn">Errors</button>
-    <button id="warningsBtn">Warnings+</button>
-    <button id="onlyAppBtn">Only this app</button>
-    <button id="exportSelectedBtn">Export selected</button>
-    <button id="exportAllBtn">Export all</button>
+    <button id="saveSessionBtn" class="btn-secondary">Save Session</button>
+    <button id="runSessionBtn" class="btn-primary">Run Session</button>
+    <button id="errorsBtn" class="btn-tertiary">Errors</button>
+    <button id="warningsBtn" class="btn-tertiary">Warnings+</button>
+    <button id="onlyAppBtn" class="btn-secondary">Only this app</button>
+    <button id="exportSelectedBtn" class="btn-tertiary">Export selected</button>
+    <button id="exportAllBtn" class="btn-tertiary">Export all</button>
     <span id="bufferInfo" class="status" style="margin-left:8px;">Rendered: 0</span>
     <span id="status" class="status">Stopped</span>
   </div>
   <div class="toolbar" id="pinnedToolbar" style="padding-top:0"></div>
     <div class="log-container" id="logContainer">
-      <div class="empty-state">Select a device and click Start to view logs</div>
+      <div class="empty-state" id="emptyState">Select a device and click Start to view logs</div>
     </div>
   <script>
     const vscode = acquireVsCodeApi();
@@ -567,6 +595,18 @@ export class LogcatPanel {
       const line = e.target.closest('.log-line');
       if (line) {
         vscode.postMessage({ type: 'copyLine', text: line.dataset.raw });
+      }
+    });
+    logContainer.addEventListener('click', (e) => {
+      const target = e.target.closest('button[data-empty-action]');
+      if (!target) return;
+      const action = target.getAttribute('data-empty-action');
+      if (action === 'startEmulator') {
+        vscode.postMessage({ type: 'startEmulator' });
+      } else if (action === 'startAppAndFilter') {
+        vscode.postMessage({ type: 'runAppAndFilter', deviceId: deviceSelect.value });
+      } else if (action === 'startStream' && deviceSelect.value) {
+        vscode.postMessage({ type: 'startStream', deviceId: deviceSelect.value });
       }
     });
     presetSelect.addEventListener('change', () => {
@@ -665,6 +705,11 @@ export class LogcatPanel {
             opt.disabled = d.status !== 'online';
             deviceSelect.appendChild(opt);
           });
+          if (!message.devices || message.devices.length === 0) {
+            setEmptyState('no-device');
+          } else if (logContainer.children.length === 0 || (logContainer.firstElementChild && logContainer.firstElementChild.classList.contains('empty-state'))) {
+            setEmptyState('no-logs');
+          }
           break;
         case 'state':
           isRunning = message.state === 'running';
@@ -673,6 +718,9 @@ export class LogcatPanel {
           deviceSelect.disabled = isRunning;
           statusEl.textContent = message.state.charAt(0).toUpperCase() + message.state.slice(1);
           statusEl.className = 'status ' + message.state;
+          if (!isRunning && allRenderedLines.length === 0) {
+            setEmptyState(deviceSelect.value ? 'no-logs' : 'no-device');
+          }
           break;
         case 'entry':
           appendEntry(message.entry);
@@ -687,9 +735,15 @@ export class LogcatPanel {
           droppedLines = 0;
           appendEntriesBatch(message.entries || []);
           updateBufferInfo();
+          if (!message.entries || message.entries.length === 0) {
+            setEmptyState(deviceSelect.value ? 'no-logs' : 'no-device');
+          }
           break;
         case 'cleared':
           logContainer.innerHTML = '';
+          allRenderedLines = [];
+          selectedLogLines.clear();
+          setEmptyState(deviceSelect.value ? 'no-logs' : 'no-device');
           break;
         case 'error':
           console.error('Logcat error:', message.message);
@@ -757,6 +811,24 @@ export class LogcatPanel {
     function updateBufferInfo() {
       bufferInfoEl.textContent = 'Rendered: ' + logContainer.children.length + ' | Dropped: ' + droppedLines;
     }
+    function setEmptyState(kind) {
+      let html = '';
+      if (kind === 'no-device') {
+        html = '<div>No device detected.</div><div style=\"margin-top:8px;\"><button data-empty-action=\"startEmulator\">Start emulator</button></div>';
+      } else if (kind === 'no-logs') {
+        html = '<div>No logs yet for selected device.</div><div style=\"margin-top:8px;display:flex;gap:8px;justify-content:center;\"><button data-empty-action=\"startStream\">Start stream</button><button data-empty-action=\"startAppAndFilter\">Start app + filter</button></div>';
+      } else {
+        html = 'Select a device and click Start to view logs';
+      }
+      logContainer.innerHTML = '<div class=\"empty-state\">' + html + '</div>';
+      updateBufferInfo();
+    }
+    function clearEmptyStateIfNeeded() {
+      const first = logContainer.firstElementChild;
+      if (first && first.classList && first.classList.contains('empty-state')) {
+        logContainer.innerHTML = '';
+      }
+    }
     function appendEntry(entry) {
       const div = document.createElement('div');
       div.className = 'log-line';
@@ -795,6 +867,7 @@ export class LogcatPanel {
       if (!entries || entries.length === 0) {
         return;
       }
+      clearEmptyStateIfNeeded();
       const frag = document.createDocumentFragment();
       for (const entry of entries) {
         frag.appendChild(appendEntry(entry));
@@ -812,6 +885,7 @@ export class LogcatPanel {
       return div.innerHTML;
     }
     updateBufferInfo();
+    setEmptyState('initial');
   </script>
 </body>
 </html>`;

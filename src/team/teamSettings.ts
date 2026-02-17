@@ -6,6 +6,8 @@ export interface TeamProjectConfig {
   schemaVersion: 2;
   exportedAt: string;
   androidToolkitSettings?: Record<string, unknown>;
+  ui?: Record<string, unknown>;
+  behavior?: Record<string, unknown>;
   launchProfiles?: LaunchProfile[];
   matrixPresets?: Array<{ name: string; deviceIds: string[] }>;
   logcatPresets?: Array<{ name: string; filter: { packageName: string; tag: string; level: string } }>;
@@ -21,6 +23,24 @@ const EXPORTABLE_SETTING_KEYS = [
   'sync.autoSync.enabled',
   'sync.autoSync.intervalMs',
   'xml.lintOnSave',
+  'ui.mode',
+  'ui.density',
+  'ui.fontSize',
+  'ui.tableRowHeight',
+  'ui.logRowHeight',
+  'runPanel.actions',
+  'keyboard.profile',
+  'keyboard.shortcuts',
+  'theme.tokens.success',
+  'theme.tokens.warn',
+  'theme.tokens.error',
+  'theme.tokens.info',
+  'notifications.channels.run',
+  'notifications.channels.gradle',
+  'notifications.channels.device',
+  'notifications.channels.logcat',
+  'notifications.channels.tips',
+  'notifications.channels.errorsOnly',
 ];
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -43,13 +63,24 @@ function flattenObject(input: Record<string, unknown>, prefix = ''): Record<stri
 export async function exportTeamConfig(context: vscode.ExtensionContext, workspaceRoot: string): Promise<string> {
   const settings = vscode.workspace.getConfiguration('androidToolkit');
   const androidToolkitSettings: Record<string, unknown> = {};
+  const ui: Record<string, unknown> = {};
+  const behavior: Record<string, unknown> = {};
   for (const key of EXPORTABLE_SETTING_KEYS) {
-    androidToolkitSettings[key] = settings.get(key);
+    const value = settings.get(key);
+    androidToolkitSettings[key] = value;
+    if (key.startsWith('ui.') || key.startsWith('runPanel.') || key.startsWith('keyboard.') || key.startsWith('theme.')) {
+      ui[key] = value;
+    }
+    if (key.startsWith('notifications.') || key.startsWith('sync.') || key.startsWith('performance.') || key.startsWith('xml.')) {
+      behavior[key] = value;
+    }
   }
   const payload: TeamProjectConfig = {
     schemaVersion: 2,
     exportedAt: new Date().toISOString(),
     androidToolkitSettings,
+    ui,
+    behavior,
     launchProfiles: readLaunchProfiles(workspaceRoot),
     matrixPresets: context.globalState.get<Array<{ name: string; deviceIds: string[] }>>(MATRIX_PRESETS_KEY, []),
     logcatPresets: context.globalState.get<Array<{ name: string; filter: { packageName: string; tag: string; level: string } }>>(LOGCAT_PRESETS_KEY, []),
@@ -67,8 +98,14 @@ export async function importTeamConfig(context: vscode.ExtensionContext, workspa
   const warnings: string[] = [...read.warnings];
 
   const settingsObj = parsed.androidToolkitSettings;
-  if (isObject(settingsObj)) {
-    const flat = flattenObject(settingsObj);
+  const uiObj = parsed.ui;
+  const behaviorObj = parsed.behavior;
+  const settingsToApply = [settingsObj, uiObj, behaviorObj].filter(isObject);
+  if (settingsToApply.length > 0) {
+    const flat = settingsToApply.reduce<Record<string, unknown>>((acc, obj) => {
+      Object.assign(acc, flattenObject(obj));
+      return acc;
+    }, {});
     const folderTarget = vscode.workspace.workspaceFolders?.[0];
     for (const [key, value] of Object.entries(flat)) {
       try {

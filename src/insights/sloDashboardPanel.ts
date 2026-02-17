@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SloSummary } from './sloSummary';
+import { SlowPathSummaryItem } from './slowPathMetrics';
 
 export class SloDashboardPanel {
   public static currentPanel: SloDashboardPanel | undefined;
@@ -7,17 +8,17 @@ export class SloDashboardPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
 
-  private constructor(panel: vscode.WebviewPanel, summary: SloSummary) {
+  private constructor(panel: vscode.WebviewPanel, summary: SloSummary, slowPaths: SlowPathSummaryItem[]) {
     this.panel = panel;
-    this.panel.webview.html = this.getHtml(summary);
+    this.panel.webview.html = this.getHtml(summary, slowPaths);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
   }
 
-  static createOrShow(summary: SloSummary): void {
+  static createOrShow(summary: SloSummary, slowPaths: SlowPathSummaryItem[]): void {
     const column = vscode.window.activeTextEditor?.viewColumn;
     if (SloDashboardPanel.currentPanel) {
       SloDashboardPanel.currentPanel.panel.reveal(column);
-      SloDashboardPanel.currentPanel.panel.webview.html = SloDashboardPanel.currentPanel.getHtml(summary);
+      SloDashboardPanel.currentPanel.panel.webview.html = SloDashboardPanel.currentPanel.getHtml(summary, slowPaths);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -26,10 +27,10 @@ export class SloDashboardPanel {
       column || vscode.ViewColumn.One,
       { enableScripts: false, retainContextWhenHidden: true }
     );
-    SloDashboardPanel.currentPanel = new SloDashboardPanel(panel, summary);
+    SloDashboardPanel.currentPanel = new SloDashboardPanel(panel, summary, slowPaths);
   }
 
-  private getHtml(summary: SloSummary): string {
+  private getHtml(summary: SloSummary, slowPaths: SlowPathSummaryItem[]): string {
     const formatMs = (value: number): string => value > 0 ? `${value} ms` : '-';
     const budgetRows = summary.commandBudgets.length === 0
       ? '<tr><td colspan="6">No command latency samples yet.</td></tr>'
@@ -42,6 +43,16 @@ export class SloDashboardPanel {
             <td>${item.samples}</td>
             <td>${item.breaches}</td>
           </tr>`).join('');
+    const slowRows = slowPaths.length === 0
+      ? '<tr><td colspan="6">No slow-stage samples yet.</td></tr>'
+      : slowPaths.map(item => `<tr>
+          <td><code>${item.stage}</code></td>
+          <td>${item.samples}</td>
+          <td>${item.failures}</td>
+          <td>${item.medianMs} ms</td>
+          <td>${item.p95Ms} ms</td>
+          <td>${item.maxMs} ms</td>
+        </tr>`).join('');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -78,6 +89,15 @@ export class SloDashboardPanel {
       </tr>
     </thead>
     <tbody>${budgetRows}</tbody>
+  </table>
+  <h3>Top Slow Stages</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Stage</th><th>Samples</th><th>Failures</th><th>Median</th><th>P95</th><th>Max</th>
+      </tr>
+    </thead>
+    <tbody>${slowRows}</tbody>
   </table>
 </body>
 </html>`;

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { SlowPathSummaryItem } from '../insights/slowPathMetrics';
 
 export interface StartupProfilerEntry {
   name: string;
@@ -12,17 +13,17 @@ export class StartupProfilerPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
 
-  private constructor(panel: vscode.WebviewPanel, entries: StartupProfilerEntry[], totalMs: number) {
+  private constructor(panel: vscode.WebviewPanel, entries: StartupProfilerEntry[], totalMs: number, slowPaths: SlowPathSummaryItem[]) {
     this.panel = panel;
-    this.panel.webview.html = this.getHtml(entries, totalMs);
+    this.panel.webview.html = this.getHtml(entries, totalMs, slowPaths);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
   }
 
-  static createOrShow(entries: StartupProfilerEntry[], totalMs: number): void {
+  static createOrShow(entries: StartupProfilerEntry[], totalMs: number, slowPaths: SlowPathSummaryItem[]): void {
     const column = vscode.window.activeTextEditor?.viewColumn;
     if (StartupProfilerPanel.currentPanel) {
       StartupProfilerPanel.currentPanel.panel.reveal(column);
-      StartupProfilerPanel.currentPanel.panel.webview.html = StartupProfilerPanel.currentPanel.getHtml(entries, totalMs);
+      StartupProfilerPanel.currentPanel.panel.webview.html = StartupProfilerPanel.currentPanel.getHtml(entries, totalMs, slowPaths);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -31,10 +32,10 @@ export class StartupProfilerPanel {
       column || vscode.ViewColumn.One,
       { enableScripts: false, retainContextWhenHidden: true }
     );
-    StartupProfilerPanel.currentPanel = new StartupProfilerPanel(panel, entries, totalMs);
+    StartupProfilerPanel.currentPanel = new StartupProfilerPanel(panel, entries, totalMs, slowPaths);
   }
 
-  private getHtml(entries: StartupProfilerEntry[], totalMs: number): string {
+  private getHtml(entries: StartupProfilerEntry[], totalMs: number, slowPaths: SlowPathSummaryItem[]): string {
     const sorted = [...entries].sort((a, b) => b.durationMs - a.durationMs);
     const rows = sorted.length === 0
       ? '<tr><td colspan="4">No startup samples yet.</td></tr>'
@@ -43,6 +44,16 @@ export class StartupProfilerPanel {
           <td>${escapeHtml(entry.name)}</td>
           <td>${entry.durationMs.toFixed(1)} ms</td>
           <td>${entry.atMs.toFixed(1)} ms</td>
+        </tr>`).join('');
+    const slowRows = slowPaths.length === 0
+      ? '<tr><td colspan="6">No runtime slow-path samples yet.</td></tr>'
+      : slowPaths.map((entry, index) => `<tr>
+          <td>${index + 1}</td>
+          <td><code>${escapeHtml(entry.stage)}</code></td>
+          <td>${entry.samples}</td>
+          <td>${entry.failures}</td>
+          <td>${entry.p95Ms} ms</td>
+          <td>${entry.maxMs} ms</td>
         </tr>`).join('');
 
     return `<!DOCTYPE html>
@@ -72,6 +83,13 @@ export class StartupProfilerPanel {
       <tr><th>#</th><th>Phase</th><th>Duration</th><th>Started At</th></tr>
     </thead>
     <tbody>${rows}</tbody>
+  </table>
+  <h3 style="margin-top:14px;">Top slow runtime stages (last 7 days)</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Stage</th><th>Samples</th><th>Failures</th><th>P95</th><th>Max</th></tr>
+    </thead>
+    <tbody>${slowRows}</tbody>
   </table>
 </body>
 </html>`;

@@ -19,6 +19,7 @@ type GradleTaskCacheEntry = {
 const GRADLE_TASK_CACHE_TTL_MS = 10_000;
 const GRADLE_TASK_STALE_TTL_MS = 60_000;
 const gradleTaskCache = new Map<string, GradleTaskCacheEntry>();
+const gradleTasksInFlight = new Map<string, Promise<GradleTaskInfo[]>>();
 const gradleResultCache = new Map<string, { at: number; result: Awaited<ReturnType<typeof runGradleTaskWithResult>> }>();
 
 export function getGradleCommand(workspaceRoot: string): string {
@@ -99,9 +100,21 @@ export async function listGradleTasks(workspaceRoot: string): Promise<GradleTask
     }
     return cached.tasks;
   }
-  const tasks = await fetchGradleTasks(workspaceRoot);
-  gradleTaskCache.set(cacheKey, { at: Date.now(), tasks, refreshing: false });
-  return tasks;
+  const inFlight = gradleTasksInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+  const taskPromise = (async () => {
+    const tasks = await fetchGradleTasks(workspaceRoot);
+    gradleTaskCache.set(cacheKey, { at: Date.now(), tasks, refreshing: false });
+    return tasks;
+  })();
+  gradleTasksInFlight.set(cacheKey, taskPromise);
+  try {
+    return await taskPromise;
+  } finally {
+    gradleTasksInFlight.delete(cacheKey);
+  }
 }
 
 async function fetchGradleTasks(workspaceRoot: string): Promise<GradleTaskInfo[]> {
@@ -151,11 +164,13 @@ async function fetchGradleTasks(workspaceRoot: string): Promise<GradleTaskInfo[]
 export function invalidateGradleTaskCache(workspaceRoot?: string): void {
   if (!workspaceRoot) {
     gradleTaskCache.clear();
+    gradleTasksInFlight.clear();
     gradleResultCache.clear();
     return;
   }
   const resolved = path.resolve(workspaceRoot);
   gradleTaskCache.delete(resolved);
+  gradleTasksInFlight.delete(resolved);
   for (const key of gradleResultCache.keys()) {
     if (key.startsWith(`${resolved}::`)) {
       gradleResultCache.delete(key);

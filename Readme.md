@@ -24,10 +24,25 @@ XML Live Preview:
 ConstraintSet Snippet Generator:
 ![ConstraintSet Snippet Generator](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/constraintset.gif)
 
+## Real Scenarios (New)
+Run -> Result flow (module/device/variant/run):
+![Run Result Flow](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/scenario-run-debug-cycle.gif)
+
+Device launch and install on target:
+![Device Launch](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/scenario-device-launch.gif)
+
+XML live edit with preview feedback:
+![XML Live Edit](https://raw.githubusercontent.com/LevKosyk/Android-Tools/main/assets/gifs/scenario-xml-live-edit.gif)
+
 ## Quick Start
 1. Install Android SDK and Emulator tools.
 2. Run `Android: Start Emulator`.
 3. Run `Android: Run App on Emulator`.
+4. Open `Android: Open Run Panel` and use one-screen flow:
+- `Module -> Device -> Variant -> Run`
+5. If run fails, use:
+- `Android: Open Run Failure Report`
+- `Android: Open SLO Dashboard`
 
 Marketplace and Support
 - Install from VS Code Marketplace (search: `Android Tools for VS Code`).
@@ -69,6 +84,7 @@ Logcat Viewer
 - Save filter presets
 - Pin favorite presets for one-click use
 - One-click `Only this app` filter (by app PID)
+- Zero-empty next steps: `No device -> Start emulator`, `No logs -> Start app + filter`
 - Export selected log lines or full visible log
 - Render window optimization for long sessions (bounded DOM + dropped counter)
 
@@ -82,7 +98,8 @@ Profiler (Lite)
 - Record 10s performance series to JSON trace
 
 Run Panel
-- Select module, device, and build variant
+- One-screen primary flow: `Module -> Device -> Variant -> Run`
+- Secondary actions moved under `Advanced Tools`
 - Build, install, run, clean, and release-quality gate
 - Stop action near Run
 - Recent run history + quick re-run
@@ -97,8 +114,27 @@ Run Panel
 - Gradle diagnostics classifier v2 (better top-error reason + targeted quick fixes)
 - Cancel active long-running operation from Command Palette
 - Smart empty-state hints with one-click quick fixes (module/device/workspace/SDK)
+- Zero-empty next steps: `No module -> Open project`, `No device -> Start emulator`
 - Built-in Quick Actions row (Run Selected / Stop Selected / Logcat This App / Health Wizard / Release Gate)
 - Unified failure block format: `Reason` + `Why` + `Suggested` + one-click fix actions
+- Unified state status bar across core panels: `Idle / Running / Failed / Fixed`
+- Customizable primary actions layout (`build/install/run/stop/clean/releaseGate`)
+- Consistent action naming across primary flows: `Run`, `Install`, `Stop`, `Release Gate`
+- Visible shortcut hints near action buttons
+- Shortcut profiles: `Default`, `Vim-like`, `JetBrains-like`
+
+Customization & Profiles
+- UI modes: `Beginner` / `Standard` / `Power User` (`Beginner` default)
+- Beginner mode hides advanced areas (Matrix, Gradle Intelligence, diagnostics dashboards)
+- Config profiles: `Solo`, `Team`, `CI-heavy`, `Release`, `Custom`
+- One-click profile apply updates Android Tools settings for workflow style
+- Notification granularity toggles: `run`, `gradle`, `device`, `logcat`, `tips`, and `errors-only`
+- Theme tokens for webviews (`success/warn/error/info`) with contrast-safe accents
+- Keyboard-first customization: remap Run Panel shortcuts from UI command
+- Keyboard profile switch command: `Android: Set Keyboard Shortcut Profile`
+- Density/font controls: `Compact/Comfortable`, panel font size, table/log row height
+- Saved panel layouts: `Debug layout`, `Release layout`, `QA layout` + custom save/apply
+- Quick Settings Center: searchable settings UI with live workspace updates
 
 First-Run Health Wizard
 - Success-driven setup check (SDK, Java/Kotlin, modules, devices)
@@ -106,10 +142,14 @@ First-Run Health Wizard
 - `Fix All Detected Issues` option before first run
 
 Onboarding v2
+- 3-step UX flow: validate environment -> apply fixes -> test run
 - Checklist UI for SDK, JDK, modules, and devices
 - One-click per-item fixes + `Fix All Detected Issues`
+- Built-in `Test Run` action at the end of onboarding
 - Direct handoff to Run Panel
 - Progress bar + health score
+- Explicit completion state: `Environment ready`
+- `Send UX Feedback` action with auto-generated diagnostics snapshot
 
 Device Selector Bar
 - Persistent status bar controls for device, module, and variant
@@ -390,6 +430,14 @@ Shortcut:
 | Android: Open Startup Profiler | Show activation phase breakdown and top startup costs |
 | Android: Open Action Replay Report | Export recent actions with args and latency for repro |
 | Android: Run Release Quality Gate | Run compile/lint/tests/release checks before publish |
+| Android: Set UI Mode | Switch Beginner / Standard / Power User UI mode |
+| Android: Apply Config Profile | Apply Solo / Team / CI-heavy / Release defaults |
+| Android: Configure Run Layout | Select and order visible Run Panel primary actions |
+| Android: Configure Keyboard Shortcuts | Remap Run Panel keyboard actions |
+| Android: Set Keyboard Shortcut Profile | Apply Default / Vim-like / JetBrains-like shortcut profile |
+| Android: Save Current Panel Layout | Save current UI/run layout as named preset |
+| Android: Apply Saved Panel Layout | Apply Debug/Release/QA/custom saved layout |
+| Android: Open Settings Center | Search + live-edit Android Tools UI/behavior settings |
 | Android: Open Failure Insights Panel | Weekly top failures + auto-fix hit rate dashboard |
 | Android: Open Stability SLO Dashboard | Data-driven stability metrics (run success, medians, session health) |
 | Android: Open Error Knowledge Base | Top errors with why/fixes/docs/file hints |
@@ -540,6 +588,12 @@ Performance tips:
 - Use `Android: Cancel Active Operation` if a long action blocks your workflow.
 - Use `Android: Open Run Panel` quick actions instead of opening many separate panels.
 
+## Known Limitations
+- This extension is not a full Android Studio replacement (no full visual layout designer parity).
+- Some advanced profiler/app-inspection capabilities are lite mode and ADB-dependent.
+- Kotlin language tooling quality depends on local Java/Kotlin extension runtime compatibility.
+- Real device/emulator state can be flaky; use preflight + auto-fix suggestions in Run Panel.
+
 ## License
 MIT
 
@@ -565,6 +619,7 @@ MIT
  - README local links and screenshots check
  - license file check
  - extension bundle size check
+ - VSIX package dry-run (`vsce package --no-yarn`)
 - Performance budgets:
  - Gradle variant parser hot-path latency budget.
  - Extension bundle size budget.
@@ -572,12 +627,24 @@ MIT
 Local prepublish gate:
 - `npm run -s prepublish:gate`
 
+Real-project reliability pass (10-15 projects):
+- `npm run -s qa:real-projects -- qa/real-projects/projects.local.json`
+- Output: `.artifacts/real-project-report.json`, `.artifacts/real-project-report.md`
+- Guide: `qa/real-projects/README.md`
+
 Release automation:
 - `npm run -s release:automate` (patch)
 - `npm run -s release:automate:minor`
 - `npm run -s release:automate:major`
+- `npm run -s release:publish:dry-run`
+
+Manual feedback loop (no telemetry):
+- Bug report template: `.github/ISSUE_TEMPLATE/bug_report.yml`
+- Include environment, repro steps, and logs for triage.
 
 ## Release Artifacts
 - Hard release checklist: `RELEASE_CHECKLIST.md`
 - Changelog: `CHANGELOG.md`
 - Release notes template: `RELEASE_NOTES_TEMPLATE.md`
+- UI release QA checklist: `docs/UI_RELEASE_QA.md`
+- Top failure triage map: `docs/TOP_10_CRASH_FIXES.md`

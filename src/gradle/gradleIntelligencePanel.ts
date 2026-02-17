@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { runGradleTaskWithResult, runGradleTaskWithResultCached } from './gradleService';
 import { showGradleOutput } from './gradleOutput';
+import { getWebviewThemeStyle } from '../ui/webviewTheme';
 
 interface ConflictRow {
   module: string;
@@ -163,26 +164,33 @@ export class GradleIntelligencePanel {
   }
 
   private getHtml(): string {
+    const themeVars = getWebviewThemeStyle();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    body { font-family: var(--vscode-font-family); color: var(--vscode-editor-foreground); padding: 12px; }
-    .row { display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap; }
-    input, button { border:1px solid var(--vscode-widget-border); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius:4px; padding:6px 8px; }
-    button { cursor:pointer; }
+    ${themeVars}
+    body { font-family: var(--vscode-font-family); font-size: var(--at-font-size, 13px); color: var(--vscode-editor-foreground); padding: var(--at-space-3); }
+    h2 { margin: 0 0 var(--at-space-2) 0; font-size: var(--at-type-title); font-weight: 700; }
+    .row { display:flex; gap:var(--at-space-2); margin-bottom:var(--at-space-3); align-items:center; flex-wrap:wrap; }
+    input, button { border:1px solid var(--vscode-widget-border); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius:var(--at-radius-sm); padding:var(--at-control-padding-y, 6px) var(--at-control-padding-x, 8px); font-size: var(--at-type-label); }
+    button { cursor:pointer; min-height: var(--at-table-row-height, 34px); font-weight: 600; }
+    button.btn-primary { background: var(--at-info); color: var(--at-info-contrast); border-color: transparent; }
+    button.btn-secondary { background: transparent; color: var(--vscode-editor-foreground); }
+    button.btn-tertiary { background: transparent; border-style: dashed; color: var(--vscode-descriptionForeground); font-weight: 500; }
     input:focus-visible, button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
-    .card { border:1px solid var(--vscode-widget-border); border-radius:8px; padding:10px; margin-bottom:10px; }
-    .muted { color: var(--vscode-descriptionForeground); font-size:12px; white-space: pre-wrap; }
-    .status { border:1px solid var(--vscode-widget-border); border-radius:8px; padding:8px 10px; min-height:34px; }
-    .status.info { color: var(--vscode-descriptionForeground); }
-    .status.success { color: #166534; border-color:#86efac; background:#dcfce744; }
-    .status.error { color: #b91c1c; border-color:#fca5a5; background:#fee2e244; font-weight:600; }
+    .card { border:1px solid var(--vscode-widget-border); border-radius:var(--at-radius-md); padding:var(--at-space-3); margin-bottom:var(--at-space-3); }
+    .muted { color: var(--vscode-descriptionForeground); font-size:var(--at-type-helper); white-space: pre-wrap; margin-bottom: var(--at-space-3); }
+    .status { border:1px solid var(--vscode-widget-border); border-radius:var(--at-radius-sm); padding:var(--at-space-2) var(--at-space-3); min-height:var(--at-table-row-height, 34px); font-size: var(--at-type-label); }
+    .status.info { color: var(--at-info-contrast); border-color: var(--at-info); background: var(--at-info-bg); }
+    .status.warn { color: var(--at-warn-contrast); border-color: var(--at-warn); background: var(--at-warn-bg); }
+    .status.error { color: var(--at-error-contrast); border-color: var(--at-error); background: var(--at-error-bg); font-weight:600; }
+    .status.success { color: var(--at-success-contrast); border-color: var(--at-success); background: var(--at-success-bg); }
     table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid var(--vscode-widget-border); padding:6px; text-align:left; font-size:12px; vertical-align: top; }
-    th { color: var(--vscode-descriptionForeground); }
+    th, td { border-bottom:1px solid var(--vscode-widget-border); padding:var(--at-space-2); min-height: var(--at-table-row-height, 34px); text-align:left; font-size:var(--at-type-label); vertical-align: top; }
+    th { color: var(--vscode-descriptionForeground); font-weight: 600; }
     code { font-family: var(--vscode-editor-font-family); }
   </style>
 </head>
@@ -193,7 +201,7 @@ export class GradleIntelligencePanel {
     <div class="row">
       <input id="module" value="app" placeholder="Module" />
       <input id="config" value="debugRuntimeClasspath" placeholder="Configuration" />
-      <button id="conflictsBtn">Detect dependency conflicts</button>
+      <button id="conflictsBtn" class="btn-primary">Detect dependency conflicts</button>
     </div>
     <table>
       <thead><tr><th>Module</th><th>Versions</th><th>Safe suggestion</th></tr></thead>
@@ -203,14 +211,14 @@ export class GradleIntelligencePanel {
   <div class="card">
     <div class="row">
       <input id="variant" value="Debug" placeholder="Variant" />
-      <button id="scanBtn">Run build scan-lite</button>
+      <button id="scanBtn" class="btn-secondary">Run build scan-lite</button>
     </div>
     <table>
       <thead><tr><th>Task</th><th>Duration</th></tr></thead>
       <tbody id="slowBody"><tr><td colspan="2">Run scan-lite to see slow tasks.</td></tr></tbody>
     </table>
   </div>
-  <div class="status info" id="status" role="status" aria-live="polite">Ready. Choose module/configuration and run a scan.</div>
+  <div class="status info" id="status" role="status" aria-live="polite">Idle — choose module/configuration and run a scan.</div>
   <script>
     const vscode = acquireVsCodeApi();
     const persisted = vscode.getState ? (vscode.getState() || {}) : {};
@@ -231,12 +239,13 @@ export class GradleIntelligencePanel {
     if (persisted.moduleName) moduleInput.value = persisted.moduleName;
     if (persisted.configuration) configInput.value = persisted.configuration;
     if (persisted.variant) variantInput.value = persisted.variant;
-    function setStatus(text, kind = 'info') {
-      status.textContent = text || '';
-      status.className = 'status ' + kind;
+    function setStatus(state, text) {
+      const sev = state === 'failed' ? 'error' : state === 'fixed' ? 'success' : 'info';
+      status.textContent = state.charAt(0).toUpperCase() + state.slice(1) + ' — ' + (text || '');
+      status.className = 'status ' + sev;
     }
     document.getElementById('conflictsBtn').addEventListener('click', () => {
-      setStatus('Scanning dependencies...', 'info');
+      setStatus('running', 'Scanning dependencies...');
       vscode.postMessage({
         type: 'detectConflicts',
         moduleName: moduleInput.value.trim(),
@@ -245,7 +254,7 @@ export class GradleIntelligencePanel {
       persistState();
     });
     document.getElementById('scanBtn').addEventListener('click', () => {
-      setStatus('Running build scan-lite...', 'info');
+      setStatus('running', 'Running build scan-lite...');
       vscode.postMessage({
         type: 'scanBuild',
         moduleName: moduleInput.value.trim(),
@@ -258,11 +267,11 @@ export class GradleIntelligencePanel {
       if (msg.type === 'status') {
         const text = msg.text || '';
         if (/failed|error/i.test(text)) {
-          setStatus(text, 'error');
+          setStatus('failed', text);
         } else if (/completed|no .*detected/i.test(text)) {
-          setStatus(text, 'success');
+          setStatus('fixed', text);
         } else {
-          setStatus(text, 'info');
+          setStatus('idle', text);
         }
       }
       if (msg.type === 'conflicts') {
@@ -287,7 +296,6 @@ export class GradleIntelligencePanel {
     variantInput.addEventListener('input', persistState);
     conflictsBody.innerHTML = '<tr><td colspan="3">Loading… run detector to show results.</td></tr>';
     slowBody.innerHTML = '<tr><td colspan="2">Loading… run scan-lite to show slow tasks.</td></tr>';
-    setInterval(persistState, 2500);
     window.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();

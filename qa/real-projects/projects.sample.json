@@ -1,0 +1,64 @@
+{
+  "projects": [
+    {
+      "name": "App-01 Kotlin Single Module",
+      "path": "/absolute/path/to/project-01",
+      "moduleName": "app",
+      "projectType": "kotlin-single"
+    },
+    {
+      "name": "App-02 Java Single Module",
+      "path": "/absolute/path/to/project-02",
+      "moduleName": "app",
+      "projectType": "java-single"
+    },
+    {
+      "name": "App-03 Multi Module",
+      "path": "/absolute/path/to/project-03",
+      "moduleName": "app",
+      "projectType": "multi-module"
+    },
+    {
+      "name": "App-04 Product Flavors",
+      "path": "/absolute/path/to/project-04",
+      "moduleName": "app",
+      "projectType": "flavors"
+    },
+    {
+      "name": "App-05 Kotlin DSL",
+      "path": "/absolute/path/to/project-05",
+      "moduleName": "app",
+      "projectType": "kts-gradle"
+    },
+    {
+      "name": "App-06 Java Legacy",
+      "path": "/absolute/path/to/project-06",
+      "moduleName": "app",
+      "projectType": "java-legacy"
+    },
+    {
+      "name": "App-07 Dynamic Feature",
+      "path": "/absolute/path/to/project-07",
+      "moduleName": "app",
+      "projectType": "dynamic-feature"
+    },
+    {
+      "name": "App-08 Compose",
+      "path": "/absolute/path/to/project-08",
+      "moduleName": "app",
+      "projectType": "compose"
+    },
+    {
+      "name": "App-09 XML Heavy",
+      "path": "/absolute/path/to/project-09",
+      "moduleName": "app",
+      "projectType": "xml-heavy"
+    },
+    {
+      "name": "App-10 Flavors + Multi Module",
+      "path": "/absolute/path/to/project-10",
+      "moduleName": "app",
+      "projectType": "flavors-multi"
+    }
+  ]
+}

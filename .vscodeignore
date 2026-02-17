@@ -14,6 +14,11 @@ node_modules/**
 **/*.spec.ts
 .github/**
 test/**
+docs/**
+qa/**
+scripts/**
+.artifacts/**
+RELEASE_NOTES_TEMPLATE.md
 assets/gifs/**
 assets/gifs/.tmp/**
 *.vsix

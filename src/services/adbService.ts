@@ -183,6 +183,51 @@ class AdbServiceClass {
     }
     return { success: true, message: `Opened ${uri}` };
   }
+  async launchIntent(
+    deviceId: string,
+    options: {
+      action?: string;
+      category?: string;
+      dataUri?: string;
+      packageName?: string;
+      component?: string;
+      flags?: string[];
+      extras?: Array<{ key: string; value: string }>;
+    }
+  ): Promise<ServiceResult> {
+    const sdk = detectSdk();
+    const cmd = ['-s', deviceId, 'shell', 'am', 'start'];
+    if (options.action) {
+      cmd.push('-a', options.action);
+    }
+    if (options.category) {
+      cmd.push('-c', options.category);
+    }
+    if (options.dataUri) {
+      cmd.push('-d', options.dataUri);
+    }
+    if (options.packageName) {
+      cmd.push('-p', options.packageName);
+    }
+    if (options.component) {
+      cmd.push('-n', options.component);
+    }
+    for (const flag of options.flags || []) {
+      if (flag.trim()) {
+        cmd.push(flag.trim());
+      }
+    }
+    for (const extra of options.extras || []) {
+      if (extra.key.trim()) {
+        cmd.push('--es', extra.key.trim(), extra.value ?? '');
+      }
+    }
+    const result = await execCommand(sdk.adb, cmd, { timeout: 60_000 });
+    if (result.exitCode !== 0) {
+      return { success: false, message: `Intent launch failed: ${result.stderr || result.stdout}` };
+    }
+    return { success: true, message: 'Intent launched.' };
+  }
   async restartApp(deviceId: string, packageName: string): Promise<ServiceResult> {
     await this.forceStopApp(deviceId, packageName);
     await new Promise(r => setTimeout(r, 500));

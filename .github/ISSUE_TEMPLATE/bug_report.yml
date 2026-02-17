@@ -1,0 +1,96 @@
+name: Bug report
+description: Report a reproducible Android Tools issue with required diagnostics
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please fill all required fields. This helps us triage quickly without telemetry.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Short summary of the bug.
+      placeholder: Run fails with INSTALL_FAILED_...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro_steps
+    attributes:
+      label: Repro steps
+      description: Exact steps from clean state.
+      placeholder: |
+        1. Open Run Panel
+        2. Select module/variant/device
+        3. Click Run
+        4. Observe failure
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      placeholder: App should install and launch on selected device.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      placeholder: Failed to install app. Gradle output says...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include versions and runtime.
+      placeholder: |
+        - OS: macOS 15.x / Windows / Linux
+        - VS Code:
+        - Android Tools extension version:
+        - Java version (`java -version`):
+        - Android Gradle Plugin:
+        - Gradle:
+        - Project type: Kotlin/Java, single/multi-module, flavors?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / diagnostics
+      description: Paste relevant logs. Use Android Tools reports when possible.
+      placeholder: |
+        - Android Tools output
+        - Gradle output (top error block)
+        - Run Failure Report excerpt
+        - Action Replay report excerpt
+    validations:
+      required: true
+
+  - type: input
+    id: reproduction
+    attributes:
+      label: Reproducibility
+      description: How often does this happen?
+      placeholder: Always / Often / Rarely
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I attached enough logs to reproduce the problem.
+          required: true

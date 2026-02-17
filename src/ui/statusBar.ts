@@ -7,7 +7,6 @@ let variantItem: vscode.StatusBarItem | undefined;
 let runItem: vscode.StatusBarItem | undefined;
 let debugItem: vscode.StatusBarItem | undefined;
 let stopItem: vscode.StatusBarItem | undefined;
-let updateInterval: NodeJS.Timeout | undefined;
 let selectedDeviceLabel = 'Device: auto';
 let selectedModuleLabel = 'Module: app';
 let selectedVariantLabel = 'Variant: Debug';
@@ -47,14 +46,6 @@ export function createStatusBar(context: vscode.ExtensionContext): vscode.Status
   stopItem.tooltip = 'Force stop app';
   context.subscriptions.push(stopItem);
   updateStatusBar();
-  updateInterval = setInterval(updateStatusBar, 5000);
-  context.subscriptions.push({
-    dispose: () => {
-      if (updateInterval) {
-        clearInterval(updateInterval);
-      }
-    },
-  });
   statusBarItem.show();
   deviceItem.show();
   moduleItem.show();
@@ -123,10 +114,6 @@ export function setSelectedVariantLabel(label: string): void {
   }
 }
 export function disposeStatusBar(): void {
-  if (updateInterval) {
-    clearInterval(updateInterval);
-    updateInterval = undefined;
-  }
   if (statusBarItem) {
     statusBarItem.dispose();
     statusBarItem = undefined;

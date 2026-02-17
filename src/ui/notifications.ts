@@ -3,14 +3,16 @@ import { AndroidToolsError } from '../core/errors';
 
 let output: vscode.OutputChannel | undefined;
 type NotificationMode = 'quiet' | 'normal';
+type NotificationCategory = 'run' | 'gradle' | 'device' | 'logcat' | 'tips';
 const NOTICE_COOLDOWN_MS = 12000;
 const lastShown = new Map<string, number>();
+const CATEGORY_KEYS: NotificationCategory[] = ['run', 'gradle', 'device', 'logcat', 'tips'];
 
 function getNotificationMode(): NotificationMode {
   const mode = vscode.workspace.getConfiguration('androidToolkit').get<string>('notifications.mode', 'quiet');
   return mode === 'normal' ? 'normal' : 'quiet';
 }
-function canShow(kind: 'warn' | 'error', message: string): boolean {
+function canShow(kind: 'info' | 'warn' | 'error', message: string): boolean {
   const key = `${kind}:${message}`;
   const now = Date.now();
   const prev = lastShown.get(key) || 0;
@@ -22,6 +24,38 @@ function canShow(kind: 'warn' | 'error', message: string): boolean {
 }
 function shouldPopupError(): boolean {
   return getNotificationMode() === 'normal';
+}
+function inferCategory(message: string, fallback: NotificationCategory = 'tips'): NotificationCategory {
+  const text = message.toLowerCase();
+  if (/logcat|adb logcat/.test(text)) {
+    return 'logcat';
+  }
+  if (/gradle|assemble|installapk|build tools|task/.test(text)) {
+    return 'gradle';
+  }
+  if (/device|emulator|avd|adb|phone|simulator/.test(text)) {
+    return 'device';
+  }
+  if (/run|launch|start app|stop app/.test(text)) {
+    return 'run';
+  }
+  return fallback;
+}
+function categoryEnabled(category: NotificationCategory): boolean {
+  const cfg = vscode.workspace.getConfiguration('androidToolkit');
+  return cfg.get<boolean>(`notifications.channels.${category}`, true);
+}
+function errorsOnlyEnabled(): boolean {
+  return vscode.workspace.getConfiguration('androidToolkit').get<boolean>('notifications.channels.errorsOnly', false);
+}
+function shouldEmit(level: 'INFO' | 'WARN' | 'ERROR', category: NotificationCategory): boolean {
+  if (level === 'ERROR') {
+    return true;
+  }
+  if (errorsOnlyEnabled()) {
+    return false;
+  }
+  return categoryEnabled(category);
 }
 
 function channel(): vscode.OutputChannel {
@@ -36,24 +70,44 @@ function logLine(level: 'INFO' | 'WARN' | 'ERROR', message: string): void {
   channel().appendLine(`[${ts}] [${level}] ${message}`);
 }
 
-export function showInfo(message: string): void {
+export function showInfo(message: string, category?: NotificationCategory): void {
+  const resolved = category || inferCategory(message, 'tips');
   logLine('INFO', message);
-  vscode.window.setStatusBarMessage(`Android Tools: ${message}`, 4000);
+  if (!shouldEmit('INFO', resolved)) {
+    return;
+  }
+  if (!canShow('info', message)) {
+    return;
+  }
+  vscode.window.setStatusBarMessage(`Android Tools: ${message}`, 2500);
 }
-export function showWarning(message: string): void {
+export function showWarning(message: string, category?: NotificationCategory): void {
+  const resolved = category || inferCategory(message, 'tips');
   logLine('WARN', message);
+  if (!shouldEmit('WARN', resolved)) {
+    return;
+  }
   if (getNotificationMode() === 'normal' && canShow('warn', message)) {
     vscode.window.showWarningMessage(message);
     return;
   }
-  vscode.window.setStatusBarMessage(`Android Tools: ${message}`, 6000);
+  if (!canShow('warn', message)) {
+    return;
+  }
+  vscode.window.setStatusBarMessage(`Android Tools: ${message}`, 4500);
 }
-export function showError(message: string): void {
-  logLine('ERROR', message);
-  if (shouldPopupError() && canShow('error', message)) {
-    vscode.window.showErrorMessage(message);
+export function showError(message: string, category?: NotificationCategory): void {
+  const resolved = category || inferCategory(message, 'tips');
+  const prefix = resolved === 'tips' ? '' : `[${resolved}] `;
+  const text = `${prefix}${message}`;
+  logLine('ERROR', text);
+  if (shouldPopupError() && canShow('error', text)) {
+    vscode.window.showErrorMessage(text);
   } else {
-    vscode.window.setStatusBarMessage(`Android Tools error: ${message}`, 8000);
+    if (!canShow('error', text)) {
+      return;
+    }
+    vscode.window.setStatusBarMessage(`Android Tools error: ${text}`, 6500);
   }
 }
 export type ActionableErrorAction = {
@@ -74,7 +128,10 @@ export async function showActionableError(payload: ActionableErrorPayload): Prom
   suggestions.forEach(s => logLine('ERROR', `Suggestion: ${s}`));
 
   if (!shouldPopupError()) {
-    vscode.window.setStatusBarMessage(`Android Tools error: ${payload.title}`, 8000);
+    if (!canShow('error', payload.title)) {
+      return;
+    }
+    vscode.window.setStatusBarMessage(`Android Tools error: ${payload.title}`, 6500);
     return;
   }
   if (!canShow('error', compactMessage)) {
@@ -107,7 +164,10 @@ export function showToolkitError(error: AndroidToolsError): void {
   if (shouldPopupError() && canShow('error', fullMessage)) {
     vscode.window.showErrorMessage(fullMessage);
   } else {
-    vscode.window.setStatusBarMessage(`Android Tools error: ${fullMessage}`, 8000);
+    if (!canShow('error', fullMessage)) {
+      return;
+    }
+    vscode.window.setStatusBarMessage(`Android Tools error: ${fullMessage}`, 6500);
   }
 }
 export async function showErrorWithDetails(
@@ -116,7 +176,10 @@ export async function showErrorWithDetails(
 ): Promise<void> {
   if (!shouldPopupError()) {
     logLine('ERROR', `${message} | details available in output`);
-    vscode.window.setStatusBarMessage(`Android Tools error: ${message}`, 8000);
+    if (!canShow('error', message)) {
+      return;
+    }
+    vscode.window.setStatusBarMessage(`Android Tools error: ${message}`, 6500);
     channel().appendLine(details);
     return;
   }
@@ -131,6 +194,9 @@ export async function showErrorWithDetails(
     });
     await vscode.window.showTextDocument(doc);
   }
+}
+export function notificationCategories(): NotificationCategory[] {
+  return [...CATEGORY_KEYS];
 }
 export async function withProgress<T>(
   title: string,

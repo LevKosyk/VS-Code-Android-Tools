@@ -4,6 +4,7 @@ import { ExecResult } from '../core/cli';
 
 let outputChannel: vscode.OutputChannel | undefined;
 let diagnostics: vscode.DiagnosticCollection | undefined;
+let lastGradleSnapshot: { task: string; exitCode: number; stdout: string; stderr: string; renderedAt: number } | undefined;
 
 function ensureChannels(): void {
   if (!outputChannel) {
@@ -97,6 +98,13 @@ export function showGradleOutput(task: string, result: ExecResult, workspaceRoot
   if (workspaceRoot) {
     updateGradleDiagnostics(workspaceRoot, result);
   }
+  lastGradleSnapshot = {
+    task,
+    exitCode: result.exitCode,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    renderedAt: Date.now(),
+  };
 }
 
 export function updateGradleDiagnostics(workspaceRoot: string, result: ExecResult): void {
@@ -120,4 +128,8 @@ export function clearGradleDiagnostics(): void {
 export function revealGradleOutput(): void {
   ensureChannels();
   outputChannel?.show(true);
+}
+
+export function getLastGradleOutputSnapshot(): { task: string; exitCode: number; stdout: string; stderr: string; renderedAt: number } | undefined {
+  return lastGradleSnapshot;
 }

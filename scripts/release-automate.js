@@ -90,11 +90,12 @@ function main() {
 
   bumpPackageVersion(target);
   upsertChangelogSection(target);
+  run('npm run -s release:sync-notes');
 
   run('npm run -s prepublish:gate');
   run('node scripts/check-release.js');
-  run('npx --yes @vscode/vsce publish --dry-run --no-yarn');
-  console.log('Release automation complete: version bumped, changelog prepared, release notes drafted, publish dry-run passed.');
+  run('npx --yes @vscode/vsce package --no-yarn --out .artifacts/android-tools-dry-run.vsix');
+  console.log('Release automation complete: version bumped, changelog prepared, release notes drafted, package dry-run passed.');
 }
 
 main();

@@ -1,8 +1,8 @@
 {
   "name": "vscode-android-tools",
   "displayName": "Android Tools for VS Code",
-  "description": "Android extension for VS Code: ADB, emulator manager, Logcat, Gradle run/debug, APK install, and XML tools",
-  "version": "0.2.2",
+  "description": "VS Code Android extension for ADB, emulator/device manager, Logcat, Gradle Run/Debug, APK install, and XML live preview",
+  "version": "0.2.3",
   "publisher": "levkosyk",
   "license": "MIT",
   "icon": "assets/logo/logo.png",
@@ -18,11 +18,15 @@
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other",
-    "Debuggers"
+    "Debuggers",
+    "Testing",
+    "Other"
   ],
+  "markdown": "github",
   "keywords": [
     "android",
+    "vscode android",
+    "vs code android extension",
     "android studio",
     "android development",
     "adb",
@@ -36,6 +40,11 @@
     "android run",
     "android xml",
     "layout preview",
+    "xml live preview",
+    "android run debug",
+    "android emulator vscode",
+    "android logcat vscode",
+    "gradle vscode",
     "compose",
     "kotlin",
     "java",
@@ -738,6 +747,43 @@
         "command": "android-toolkit.openProfiler",
         "title": "Android: Open Performance Profiler",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "android-toolkit.setUiMode",
+        "title": "Android: Set UI Mode"
+      },
+      {
+        "command": "android-toolkit.applyConfigProfile",
+        "title": "Android: Apply Config Profile"
+      },
+      {
+        "command": "android-toolkit.configureRunLayout",
+        "title": "Android: Configure Run Layout"
+      },
+      {
+        "command": "android-toolkit.configureKeyboardShortcuts",
+        "title": "Android: Configure Keyboard Shortcuts",
+        "icon": "$(keyboard)"
+      },
+      {
+        "command": "android-toolkit.saveCurrentPanelLayout",
+        "title": "Android: Save Current Panel Layout",
+        "icon": "$(save)"
+      },
+      {
+        "command": "android-toolkit.applySavedPanelLayout",
+        "title": "Android: Apply Saved Panel Layout",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "android-toolkit.openSettingsCenter",
+        "title": "Android: Open Settings Center",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "android-toolkit.setKeyboardShortcutProfile",
+        "title": "Android: Set Keyboard Shortcut Profile",
+        "icon": "$(keyboard)"
       }
     ],
     "menus": {
@@ -989,6 +1035,165 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Run lightweight layout XML lint checks when saving `res/layout/*.xml` files."
+        },
+        "androidToolkit.ui.mode": {
+          "type": "string",
+          "enum": [
+            "beginner",
+            "standard",
+            "power"
+          ],
+          "default": "beginner",
+          "markdownDescription": "Preset UI mode. `beginner` hides complex tools (Matrix/Gradle Intelligence/Diagnostics), `standard` is balanced, `power` shows all advanced tools."
+        },
+        "androidToolkit.config.profile": {
+          "type": "string",
+          "enum": [
+            "solo",
+            "team",
+            "ci-heavy",
+            "release",
+            "custom"
+          ],
+          "default": "solo",
+          "markdownDescription": "Active Android Tools config profile. Use `Android: Apply Config Profile` to switch quickly."
+        },
+        "androidToolkit.runPanel.actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "build",
+              "install",
+              "run",
+              "stop",
+              "clean",
+              "releaseGate"
+            ]
+          },
+          "default": [
+            "build",
+            "install",
+            "run",
+            "stop",
+            "clean",
+            "releaseGate"
+          ],
+          "markdownDescription": "Ordered list of visible primary actions in Run Panel. Use `Android: Configure Run Layout` for quick setup."
+        },
+        "androidToolkit.run.autoRetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enable auto-retry for known flaky run stages (ADB install, wait-for-device)."
+        },
+        "androidToolkit.run.autoRetry.maxRetries": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 5,
+          "markdownDescription": "Max retry attempts for flaky run stages when auto-retry is enabled."
+        },
+        "androidToolkit.notifications.channels.run": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show run-related info/warn notifications."
+        },
+        "androidToolkit.notifications.channels.gradle": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show Gradle-related info/warn notifications."
+        },
+        "androidToolkit.notifications.channels.device": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show device/emulator-related info/warn notifications."
+        },
+        "androidToolkit.notifications.channels.logcat": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show Logcat-related info/warn notifications."
+        },
+        "androidToolkit.notifications.channels.tips": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show general tips/info notifications."
+        },
+        "androidToolkit.notifications.channels.errorsOnly": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "When enabled, suppresses all info/warn notifications and shows only errors."
+        },
+        "androidToolkit.theme.tokens.success": {
+          "type": "string",
+          "default": "#22c55e",
+          "markdownDescription": "Webview success accent color (hex, e.g. #22c55e)."
+        },
+        "androidToolkit.theme.tokens.warn": {
+          "type": "string",
+          "default": "#f59e0b",
+          "markdownDescription": "Webview warning accent color (hex, e.g. #f59e0b)."
+        },
+        "androidToolkit.theme.tokens.error": {
+          "type": "string",
+          "default": "#ef4444",
+          "markdownDescription": "Webview error accent color (hex, e.g. #ef4444)."
+        },
+        "androidToolkit.theme.tokens.info": {
+          "type": "string",
+          "default": "#0ea5e9",
+          "markdownDescription": "Webview info accent color (hex, e.g. #0ea5e9)."
+        },
+        "androidToolkit.keyboard.shortcuts": {
+          "type": "object",
+          "default": {
+            "run": "Enter",
+            "stop": "Mod+Shift+S",
+            "rerun": "Mod+R",
+            "releaseGate": "Mod+Shift+G",
+            "refresh": "Mod+Shift+R"
+          },
+          "markdownDescription": "Keyboard-first shortcuts for Android Run Panel actions."
+        },
+        "androidToolkit.ui.density": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "comfortable"
+          ],
+          "default": "comfortable",
+          "markdownDescription": "Panel density for Android Tools webviews."
+        },
+        "androidToolkit.ui.fontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 11,
+          "maximum": 18,
+          "markdownDescription": "Base font size for Android Tools webviews."
+        },
+        "androidToolkit.ui.tableRowHeight": {
+          "type": "number",
+          "default": 34,
+          "minimum": 22,
+          "maximum": 52,
+          "markdownDescription": "Preferred table row height (px) for Android Tools panels."
+        },
+        "androidToolkit.ui.logRowHeight": {
+          "type": "number",
+          "default": 24,
+          "minimum": 16,
+          "maximum": 42,
+          "markdownDescription": "Preferred log/list row height (px) for Android Tools panels."
+        },
+        "androidToolkit.keyboard.profile": {
+          "type": "string",
+          "enum": [
+            "default",
+            "vim",
+            "jetbrains",
+            "custom"
+          ],
+          "default": "default",
+          "markdownDescription": "Keyboard shortcut profile for Run Panel actions."
         }
       }
     }
@@ -1001,12 +1206,18 @@
     "test": "npm run compile && node test/run-node-tests.js",
     "test:p0": "npm run compile && node --test test/p0-run-scenarios-smoke.test.js test/commands-smoke.test.js",
     "test:runtime": "npm run compile && node test/vscode/runTest.js",
+    "qa:real-projects": "node scripts/run-real-project-checks.js",
     "release:notes": "node scripts/check-release.js",
+    "release:sync-notes": "node scripts/sync-release-notes-from-git.js",
+    "release:sync-notes:dry": "node scripts/sync-release-notes-from-git.js --dry-run",
+    "release:publish:dry-run": "npx --yes @vscode/vsce package --no-yarn --out .artifacts/android-tools-dry-run.vsix",
     "release:automate": "node scripts/release-automate.js patch",
     "release:automate:minor": "node scripts/release-automate.js minor",
     "release:automate:major": "node scripts/release-automate.js major",
+    "release:github": "node scripts/publish-github-releases.js",
+    "release:github:prepare": "node scripts/publish-github-releases.js --prepare-only",
     "prepublish:gate": "npm run compile && npm run lint && npm test --silent && npm run test:p0 && node scripts/check-release.js",
-    "release:check": "npm run prepublish:gate && npm run test:runtime",
+    "release:check": "npm run prepublish:gate && npm run test:runtime && npm run release:publish:dry-run",
     "release:package": "npm run release:check && npx --yes @vscode/vsce package --no-yarn"
   },
   "devDependencies": {
@@ -1017,5 +1228,8 @@
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
   }
 }

@@ -14,10 +14,12 @@ function indexOfOrThrow(needle) {
 
 test('P0 run flow keeps expected guard order', () => {
   const iPreflight = indexOfOrThrow('runPreflightChecks(workspaceRoot, moduleName, variant, deviceId, true)');
-  const iInstallGuard = indexOfOrThrow("runGuarded(\n          'Install APK'");
+  const iPipelineInstall = indexOfOrThrow('if (pipeline.install) {');
+  const iInstallGuard = indexOfOrThrow("runGuarded(\n            'Install APK'");
   const iStartGuard = indexOfOrThrow("runGuarded(\n          'Start app'");
   const iHistory = indexOfOrThrow('appendRunHistory({ moduleName, variant, deviceId })');
-  assert.equal(iPreflight < iInstallGuard, true, 'Preflight must run before install');
+  assert.equal(iPreflight < iPipelineInstall, true, 'Preflight must run before install stage');
+  assert.equal(iPipelineInstall < iInstallGuard, true, 'Install stage should wrap install guard');
   assert.equal(iInstallGuard < iStartGuard, true, 'Install must run before start');
   assert.equal(iStartGuard < iHistory, true, 'History should be appended after successful start');
 });

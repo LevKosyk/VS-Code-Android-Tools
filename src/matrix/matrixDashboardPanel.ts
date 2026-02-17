@@ -4,6 +4,7 @@ import { findApplicationId, findApplicationModules, findLatestApk } from '../cor
 import { runGradleTaskWithResult } from '../gradle/gradleService';
 import { showGradleOutput } from '../gradle/gradleOutput';
 import { AdbService } from '../services/adbService';
+import { getWebviewThemeStyle } from '../ui/webviewTheme';
 
 interface MatrixPreset {
   name: string;
@@ -232,12 +233,14 @@ export class MatrixDashboardPanel {
   }
 
   private getHtml(): string {
+    const themeVars = getWebviewThemeStyle();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
+    ${themeVars}
     :root {
       --bg: var(--vscode-editor-background);
       --fg: var(--vscode-editor-foreground);
@@ -246,28 +249,32 @@ export class MatrixDashboardPanel {
       --input-fg: var(--vscode-input-foreground);
       --muted: var(--vscode-descriptionForeground);
     }
-    body { font-family: var(--vscode-font-family); background: var(--bg); color: var(--fg); padding: 12px; }
-    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-    .list { border: 1px solid var(--border); border-radius: 6px; padding: 8px; max-height: 180px; overflow: auto; margin-bottom: 10px; }
+    body { font-family: var(--vscode-font-family); font-size: var(--at-font-size, 13px); background: var(--bg); color: var(--fg); padding: var(--at-space-3); }
+    .row { display: flex; gap: var(--at-space-2); align-items: center; margin-bottom: var(--at-space-3); flex-wrap: wrap; }
+    .list { border: 1px solid var(--border); border-radius: var(--at-radius-sm); padding: var(--at-space-2); max-height: 180px; overflow: auto; margin-bottom: var(--at-space-3); }
     select, input, button, textarea {
       border: 1px solid var(--border);
       background: var(--input-bg);
       color: var(--input-fg);
-      border-radius: 4px;
-      padding: 6px 8px;
-      font-size: 12px;
+      border-radius: var(--at-radius-sm);
+      padding: var(--at-control-padding-y, 6px) var(--at-control-padding-x, 8px);
+      font-size: var(--at-type-label);
     }
     select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-visible {
       outline: 2px solid var(--vscode-focusBorder);
       outline-offset: 1px;
     }
-    button { cursor: pointer; }
-    .muted { color: var(--muted); white-space: pre-wrap; font-size: 12px; }
-    .status { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; min-height: 34px; }
-    .status.info { color: var(--muted); }
-    .status.success { color: #166534; border-color: #86efac; background: #dcfce744; }
-    .status.error { color: #b91c1c; border-color: #fca5a5; background: #fee2e244; font-weight: 600; }
-    .hint { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+    button { cursor: pointer; min-height: var(--at-table-row-height, 34px); font-weight: 600; }
+    button.btn-primary { background: var(--at-info); color: var(--at-info-contrast); border-color: transparent; }
+    button.btn-secondary { background: transparent; color: var(--fg); }
+    button.btn-tertiary { background: transparent; border-style: dashed; color: var(--muted); font-weight: 500; }
+    .muted { color: var(--muted); white-space: pre-wrap; font-size: var(--at-type-helper); }
+    .status { border: 1px solid var(--border); border-radius: var(--at-radius-sm); padding: var(--at-space-2) var(--at-space-3); min-height: var(--at-table-row-height, 34px); font-size: var(--at-type-label); }
+    .status.info { color: var(--at-info-contrast); border-color: var(--at-info); background: var(--at-info-bg); }
+    .status.warn { color: var(--at-warn-contrast); border-color: var(--at-warn); background: var(--at-warn-bg); }
+    .status.error { color: var(--at-error-contrast); border-color: var(--at-error); background: var(--at-error-bg); font-weight: 600; }
+    .status.success { color: var(--at-success-contrast); border-color: var(--at-success); background: var(--at-success-bg); }
+    .hint { font-size: var(--at-type-helper); color: var(--muted); margin: var(--at-space-2) 0 var(--at-space-3); }
   </style>
 </head>
 <body>
@@ -289,18 +296,18 @@ export class MatrixDashboardPanel {
   <div class="hint">Tip: save a preset, then run matrix in one click. Use Ctrl/Cmd+Enter to start.</div>
   <div class="row">
     <input id="presetName" placeholder="Preset name" />
-    <button id="savePreset">Save Preset</button>
+    <button id="savePreset" class="btn-secondary">Save Preset</button>
     <select id="presetSelect"></select>
-    <button id="loadPreset">Load</button>
-    <button id="deletePreset">Delete</button>
+    <button id="loadPreset" class="btn-tertiary">Load</button>
+    <button id="deletePreset" class="btn-tertiary">Delete</button>
   </div>
   <div class="row">
-    <button id="runBtn">Run Matrix</button>
-    <button id="refreshHistoryBtn">Refresh Flaky History</button>
+    <button id="runBtn" class="btn-primary">Run Matrix</button>
+    <button id="refreshHistoryBtn" class="btn-secondary">Refresh Flaky History</button>
   </div>
   <div class="list" id="results"></div>
   <div class="list" id="history"></div>
-  <div class="status info" id="status" role="status" aria-live="polite">Ready. Select devices and mode, then press Run Matrix.</div>
+  <div class="status info" id="status" role="status" aria-live="polite">Idle — select devices and mode, then press Run Matrix.</div>
   <script>
     const vscode = acquireVsCodeApi();
     const devicesEl = document.getElementById('devices');
@@ -310,9 +317,10 @@ export class MatrixDashboardPanel {
     const history = document.getElementById('history');
     const status = document.getElementById('status');
     const persisted = vscode.getState ? (vscode.getState() || {}) : {};
-    function setStatus(text, kind = 'info') {
-      status.textContent = text || '';
-      status.className = 'status ' + kind;
+    function setStatus(state, text) {
+      const sev = state === 'failed' ? 'error' : state === 'fixed' ? 'success' : 'info';
+      status.textContent = state.charAt(0).toUpperCase() + state.slice(1) + ' — ' + (text || '');
+      status.className = 'status ' + sev;
     }
     function persistState() {
       if (!vscode.setState) return;
@@ -384,7 +392,7 @@ export class MatrixDashboardPanel {
         runner: document.getElementById('runner').value.trim(),
         deviceIds: selectedDeviceIds(),
       });
-      setStatus('Running matrix...', 'info');
+      setStatus('running', 'Running matrix...');
       results.textContent = '';
       persistState();
     });
@@ -428,11 +436,11 @@ export class MatrixDashboardPanel {
       if (msg.type === 'status') {
         const text = msg.text || '';
         if (/failed|failure|error|required/i.test(text)) {
-          setStatus(text, 'error');
+          setStatus('failed', text);
         } else if (/completed successfully|completed|finished with 0/i.test(text)) {
-          setStatus(text, 'success');
+          setStatus('fixed', text);
         } else {
-          setStatus(text, 'info');
+          setStatus('idle', text);
         }
       }
       if (msg.type === 'history') {
@@ -460,7 +468,6 @@ export class MatrixDashboardPanel {
       e.preventDefault();
       document.getElementById('runBtn').click();
     });
-    setInterval(persistState, 2500);
     vscode.postMessage({ type: 'loadData' });
   </script>
 </body>

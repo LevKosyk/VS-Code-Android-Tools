@@ -8,6 +8,7 @@ type DeviceCacheEntry = {
 };
 const DEVICE_CACHE_TTL_MS = 3000;
 let deviceCache: DeviceCacheEntry | undefined;
+let devicesInFlight: Promise<AndroidDevice[]> | undefined;
 function parseDeviceStatus(status: string): DeviceStatus {
   switch (status.toLowerCase()) {
     case 'device':
@@ -78,21 +79,32 @@ export async function listDevicesDetailed(): Promise<AndroidDevice[]> {
   if (deviceCache && Date.now() - deviceCache.at < DEVICE_CACHE_TTL_MS) {
     return deviceCache.devices;
   }
-  const devices = await listDevices();
-  const detailedDevices = await Promise.all(
-    devices.map(async (device) => {
-      if (device.status === 'online') {
-        const info = await getDeviceInfo(device.id);
-        return { ...device, ...info };
-      }
-      return device;
-    })
-  );
-  deviceCache = { at: Date.now(), devices: detailedDevices };
-  return detailedDevices;
+  if (devicesInFlight) {
+    return devicesInFlight;
+  }
+  devicesInFlight = (async () => {
+    const devices = await listDevices();
+    const detailedDevices = await Promise.all(
+      devices.map(async (device) => {
+        if (device.status === 'online') {
+          const info = await getDeviceInfo(device.id);
+          return { ...device, ...info };
+        }
+        return device;
+      })
+    );
+    deviceCache = { at: Date.now(), devices: detailedDevices };
+    return detailedDevices;
+  })();
+  try {
+    return await devicesInFlight;
+  } finally {
+    devicesInFlight = undefined;
+  }
 }
 export function invalidateDeviceCache(): void {
   deviceCache = undefined;
+  devicesInFlight = undefined;
 }
 export async function isDeviceConnected(deviceId: string): Promise<boolean> {
   const devices = await listDevices();
