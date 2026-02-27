@@ -2,12 +2,14 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { CategoryId, CATEGORY_CONFIGS } from './types';
+import { ProjectViewMode } from './types';
 import { 
   ProjectTreeItem, 
   createRootNode, 
   createCategoryNode, 
   createFileNode,
-  createPackageNode
+  createPackageNode,
+  createFolderNode
 } from './projectTreeItem';
 import { 
   scanCategory, 
@@ -28,6 +30,7 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
   private refreshTimer: NodeJS.Timeout | undefined;
   private readonly treeCache = new Map<string, ProjectTreeItem[]>();
   private readonly pendingCache = new Map<string, Promise<ProjectTreeItem[]>>();
+  private viewMode: ProjectViewMode = 'android';
   constructor() {
     this.updateWorkspace();
     this.dragAndDropController = new AndroidProjectDragAndDropController(this);
@@ -43,6 +46,18 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
       this.isAndroid = false;
       this.projectName = 'No Workspace';
     }
+    const configured = vscode.workspace.getConfiguration('androidToolkit').get<string>('projectView.mode', 'android');
+    this.viewMode = configured === 'files' || configured === 'packages' ? configured : 'android';
+  }
+  getViewMode(): ProjectViewMode {
+    return this.viewMode;
+  }
+  setViewMode(mode: ProjectViewMode): void {
+    if (this.viewMode === mode) {
+      return;
+    }
+    this.viewMode = mode;
+    this.refresh();
   }
   refresh(): void {
     if (this.refreshTimer) {
@@ -68,10 +83,14 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
         return [this.createNotAndroidItem()];
       }
       if (!element) {
-        return this.getRootChildren();
+        return this.getRootChildrenByMode();
       }
-      if (element.data.type === 'root') {
+      if (this.viewMode === 'android' && element.data.type === 'root') {
         return this.getCategoryNodes();
+      }
+      if (this.viewMode === 'packages' && element.data.type === 'root') {
+        const key = 'packages:java';
+        return this.getCachedChildren(key, () => this.getJavaPackageChildren());
       }
       if (element.data.type === 'category' && element.data.categoryId) {
         const key = `category:${element.data.categoryId}`;
@@ -92,6 +111,18 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
       }
       return [];
     });
+  }
+  private getRootChildrenByMode(): ProjectTreeItem[] | Promise<ProjectTreeItem[]> {
+    if (!this.workspaceRoot) {
+      return [this.createNoWorkspaceItem()];
+    }
+    if (this.viewMode === 'files') {
+      return [createFolderNode(vscode.Uri.file(this.workspaceRoot), this.projectName, true)];
+    }
+    if (this.viewMode === 'packages') {
+      return [createRootNode(`${this.projectName} Packages`)];
+    }
+    return this.getRootChildren();
   }
   private async getCachedChildren(
     key: string,
@@ -147,6 +178,20 @@ export class AndroidProjectProvider implements vscode.TreeDataProvider<ProjectTr
         createFileNode(file.uri, file.name, file.isDirectory)
       );
     });
+  }
+  private async getJavaPackageChildren(): Promise<ProjectTreeItem[]> {
+    if (!this.workspaceRoot) {
+      return [];
+    }
+    const javaConfig = CATEGORY_CONFIGS.find(c => c.id === 'java');
+    if (!javaConfig) {
+      return [];
+    }
+    const result = await scanCategory(this.workspaceRoot, javaConfig);
+    if (result.files.length === 0) {
+      return [this.createEmptyItem('No Java/Kotlin sources found')];
+    }
+    return this.buildPackageTree(result.files, result.rootPath);
   }
   private async buildPackageTree(
     files: DiscoveredFile[],

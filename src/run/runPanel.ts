@@ -324,6 +324,27 @@ export class RunPanel {
         editor.revealRange(new vscode.Range(pos, pos));
         break;
       }
+      case 'copyErrorContext': {
+        const moduleName = String(message.moduleName || '').trim() || '(not selected)';
+        const variant = String(message.variant || '').trim() || '(not selected)';
+        const deviceId = String(message.deviceId || '').trim() || '(not selected)';
+        const errorSummary = String(message.errorSummary || '').trim() || '(no error details)';
+        const file = String(message.file || '').trim();
+        const line = Number(message.line || 0);
+        const column = Number(message.column || 0);
+        const context = [
+          'Android Tools Error Context',
+          `Time: ${new Date().toISOString()}`,
+          `Module: ${moduleName}`,
+          `Variant: ${variant}`,
+          `Device: ${deviceId}`,
+          `Error: ${errorSummary}`,
+          file ? `Location: ${file}${line > 0 ? `:${line}${column > 0 ? `:${column}` : ''}` : ''}` : '',
+        ].filter(Boolean).join('\n');
+        await vscode.env.clipboard.writeText(context);
+        this.postMessage({ type: 'result', action: 'copyErrorContext', success: true, message: 'Error context copied to clipboard.' });
+        break;
+      }
       case 'refresh': {
         const [devices, modules, history, health, uiConfig, timeline] = await Promise.all([
           this.handlers.getDevices(),
@@ -592,6 +613,7 @@ export class RunPanel {
       <div class="error-title">Gradle Error</div>
       <div id="errorText" class="error-text"></div>
       <div class="error-actions">
+        <button id="copyErrorCtxBtn" class="btn-secondary">Copy Error Context</button>
         <button id="openErrLocationBtn" class="btn-secondary">Open Error Location</button>
         <button id="openGradleBtn" class="btn-secondary">Open Gradle Output</button>
       </div>
@@ -628,6 +650,7 @@ export class RunPanel {
           <button id="qaLogcatBtn" class="btn-tertiary">Logcat This App</button>
           <button id="qaCrashReproBtn" class="btn-secondary">Crash Repro</button>
           <button id="qaArtifactsBtn" class="btn-secondary">Export Artifacts</button>
+          <button id="qaLastFailedBtn" class="btn-secondary">Open Last Failed</button>
           <button id="qaHealthBtn" class="btn-tertiary">Health Wizard</button>
           <button id="qaReleaseGateBtn" class="btn-tertiary">Run Full Gate</button>
         </div>
@@ -723,6 +746,7 @@ export class RunPanel {
     const errorText = document.getElementById('errorText');
     const openGradleBtn = document.getElementById('openGradleBtn');
     const openErrLocationBtn = document.getElementById('openErrLocationBtn');
+    const copyErrorCtxBtn = document.getElementById('copyErrorCtxBtn');
     const fixRow = document.getElementById('fixRow');
     const historyList = document.getElementById('historyList');
     const historySearch = document.getElementById('historySearch');
@@ -746,6 +770,7 @@ export class RunPanel {
     const qaLogcatBtn = document.getElementById('qaLogcatBtn');
     const qaCrashReproBtn = document.getElementById('qaCrashReproBtn');
     const qaArtifactsBtn = document.getElementById('qaArtifactsBtn');
+    const qaLastFailedBtn = document.getElementById('qaLastFailedBtn');
     const qaHealthBtn = document.getElementById('qaHealthBtn');
     const qaReleaseGateBtn = document.getElementById('qaReleaseGateBtn');
     const saveRuleBtn = document.getElementById('saveRuleBtn');
@@ -764,6 +789,7 @@ export class RunPanel {
     const historyCard = document.getElementById('historyCard');
     const timelineCard = document.getElementById('timelineCard');
     const advancedSection = document.getElementById('advancedSection');
+    copyErrorCtxBtn.disabled = true;
 
     const actionButtonsById = {
       build: buildBtn,
@@ -925,6 +951,7 @@ export class RunPanel {
     let historyLoaded = false;
     let selectedHistoryId = '';
     let lastErrorLocation = null;
+    let lastErrorSummary = '';
     let historyItems = [];
     let lastHistoryIds = [];
     let lastTimelineIds = [];
@@ -1185,17 +1212,21 @@ export class RunPanel {
         errorBox.classList.remove('visible');
         errorBox.classList.remove('reveal');
         errorText.textContent = '';
+        lastErrorSummary = '';
         fixRow.innerHTML = '';
         lastErrorLocation = null;
         openErrLocationBtn.disabled = true;
+        copyErrorCtxBtn.disabled = true;
         return;
       }
       errorText.textContent = gradleError;
+      lastErrorSummary = gradleError;
       errorBox.classList.add('visible');
       errorBox.classList.remove('reveal');
       requestAnimationFrame(() => errorBox.classList.add('reveal'));
       lastErrorLocation = errorLocation || null;
       openErrLocationBtn.disabled = !lastErrorLocation;
+      copyErrorCtxBtn.disabled = false;
       fixRow.innerHTML = '';
       (fixes || []).forEach((fix, index) => {
         const b = document.createElement('button');
@@ -1410,6 +1441,16 @@ export class RunPanel {
       advancedSection.addEventListener('toggle', () => persistPanelState());
     }
     openGradleBtn.addEventListener('click', () => vscode.postMessage({ type: 'openGradleOutput' }));
+    copyErrorCtxBtn.addEventListener('click', () => {
+      vscode.postMessage({
+        type: 'copyErrorContext',
+        moduleName: moduleSelect.value,
+        variant: variantSelect.value,
+        deviceId: deviceSelect.value,
+        errorSummary: lastErrorSummary,
+        ...(lastErrorLocation || {}),
+      });
+    });
     openErrLocationBtn.addEventListener('click', () => {
       if (!lastErrorLocation) return;
       vscode.postMessage({ type: 'openErrorLocation', ...lastErrorLocation });
@@ -1503,6 +1544,11 @@ export class RunPanel {
       setBusy(true);
       vscode.postMessage({ type: 'quickAction', actionId: 'export-run-artifacts', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
       setStatusState('running', 'Exporting run artifacts bundle...');
+    });
+    qaLastFailedBtn.addEventListener('click', () => {
+      setBusy(true);
+      vscode.postMessage({ type: 'quickAction', actionId: 'open-last-failed', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
+      setStatusState('running', 'Opening last failed step...');
     });
     qaHealthBtn.addEventListener('click', () => {
       setBusy(true);

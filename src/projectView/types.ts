@@ -5,6 +5,11 @@ export type ProjectNodeType =
   | 'folder'         
   | 'package'        
   | 'file';          
+
+export type ProjectViewMode =
+  | 'android'
+  | 'files'
+  | 'packages';
 export type CategoryId = 
   | 'manifests'
   | 'java'

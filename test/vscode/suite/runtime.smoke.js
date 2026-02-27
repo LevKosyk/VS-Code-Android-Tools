@@ -42,6 +42,17 @@ async function runRuntimeSmoke() {
     'android-toolkit.generateConstraintSetSnippet',
     'android-toolkit.showGradleOutput',
     'android-toolkit.openLogcat',
+    'android-toolkit.openCrashSymbolicator',
+    'android-toolkit.openDeepLinkStudio',
+    'android-toolkit.openAdbMacroRecorder',
+    'android-toolkit.openSnapshotScenarioRunner',
+    'android-toolkit.projectBlueprintTemplates',
+    'android-toolkit.resourceRefactorTools',
+    'android-toolkit.scanApiCompatibility',
+    'android-toolkit.runDeviceFarmPreset',
+    'android-toolkit.configureDeviceFarmPresets',
+    'android-toolkit.openLastFailedStep',
+    'android-toolkit.exportDiagnosticsBundle',
   ];
 
   for (const commandId of critical) {
@@ -52,6 +63,10 @@ async function runRuntimeSmoke() {
   await executeNoThrow('android-toolkit.openRunPanel');
   await executeNoThrow('android-toolkit.cancelActiveOperation');
   await executeNoThrow('android-toolkit.showGradleOutput');
+  await executeNoThrow('android-toolkit.openCrashSymbolicator');
+  await executeNoThrow('android-toolkit.openDeepLinkStudio');
+  await executeNoThrow('android-toolkit.openAdbMacroRecorder');
+  await executeNoThrow('android-toolkit.openSnapshotScenarioRunner');
   await executeNoThrow('android-toolkit.ciSmoke');
 }
 

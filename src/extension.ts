@@ -52,7 +52,6 @@ import {
   showWarning,
   showError, 
   showActionableError,
-  showToolkitError, 
   withProgress 
 } from './ui/notifications';
 import { createStatusBar, refreshStatusBar, setSelectedDeviceLabel, setSelectedModuleLabel, setSelectedVariantLabel } from './ui/statusBar';
@@ -81,9 +80,12 @@ import {
   fixMissingConstraints,
 } from './layout/xmlDiagnostics';
 import { insertManifestTemplate, validateManifest, openManifestEditor, addManifestEntryFlow } from './projectView/manifestTools';
+import { runManifestDiffAssistant } from './projectView/manifestDiffAssistant';
 import { insertValuesTemplate, validateResources } from './projectView/resourceTools';
 import { openResourceInspector, openResourceByQuery } from './projectView/resourceInspector';
+import { openResourceRefactorTools, bulkMoveResources, bulkRenameResources } from './projectView/resourceRefactorTools';
 import { jumpToNavigationArgument, jumpToNavigationDestination, previewNavigationGraphSvg } from './projectView/navigationTools';
+import { runProjectBlueprintTemplatesWizard } from './projectView/projectBlueprintTemplates';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -98,11 +100,13 @@ import {
   bumpVersionCodeWizard,
   runReleaseFlowWizard,
 } from './signing/signingWizard';
+import { runReleaseGateWizardPlus } from './release/releaseGateWizardPlus';
 import { checkProjectHealth } from './core/projectHealth';
 import { showGradleOutput, revealGradleOutput, getLastGradleOutputSnapshot } from './gradle/gradleOutput';
 import { inspectBuildCache } from './gradle/buildCacheInspector';
 import { runGradleDoctor } from './gradle/gradleDoctor';
 import { runDependencyInsight } from './gradle/dependencyInsight';
+import { runApiCompatibilityScanner } from './core/apiCompatibilityScanner';
 import { issueToMultiline, runGuarded, ToolkitIssue } from './core/stability';
 import { operationManager } from './core/operations';
 import { execCommand } from './core/cli';
@@ -116,6 +120,7 @@ import { pickSmartDeviceId } from './run/smartDevice';
 import { ERROR_REASON_META, normalizeErrorReason } from './run/errorTaxonomy';
 import { listManifestLaunchTargets, LaunchTarget } from './run/launchTargets';
 import { buildInstallDiffSummary, readApkSnapshot, readInstalledSnapshot, InstallDiffSnapshot } from './run/installDiff';
+import { DeviceFarmPreset, getDeviceFarmPresets, removeDeviceFarmPreset, upsertDeviceFarmPreset } from './matrix/deviceFarmPresets';
 import type { OnboardingCheck } from './ui/onboardingPanel';
 import { FailureInsightsPanel, RunFixAttemptRecord, summarizeFailureInsights } from './insights/failureInsightsPanel';
 import { exportTeamConfig, importTeamConfig } from './team/teamSettings';
@@ -123,10 +128,12 @@ import { SloDashboardPanel } from './insights/sloDashboardPanel';
 import { RunActionMetric, SessionRecord, summarizeSlo } from './insights/sloSummary';
 import { CommandLatencyRecord, summarizeCommandBudgets } from './insights/commandBudget';
 import { SlowPathRecord, SlowPathStage, summarizeSlowPaths } from './insights/slowPathMetrics';
+import { CrashSymbolicatorPanel } from './diagnostics/crashSymbolicatorPanel';
 let extensionContext: vscode.ExtensionContext | undefined;
 let lastGradleErrorSummary: string | undefined;
 let lastGradleErrorLocation: { file: string; line: number; column?: number } | undefined;
 let lastGradleErrorTags: GradleFailureTag[] = [];
+let lastFixCommandHints: string[] = [];
 const runFailureRecords: RunFailureRecord[] = [];
 interface RunConfiguration {
   id: string;
@@ -371,36 +378,212 @@ function reportRunProblem(
   void persistRunFailureRecords();
 }
 function issueToRunResult(issue: ToolkitIssue, fallbackMessage: string, fixes: RunFixSuggestion[] = []): RunActionResult {
+  const gradleError = issueToMultiline(issue);
+  const commandHints = extractCommandCandidates([issue.action, issue.details, gradleError].filter(Boolean).join('\n'));
+  if (commandHints.length > 0) {
+    lastFixCommandHints = commandHints;
+  }
+  const fixSuggestions = fixes.length > 0 ? [...fixes] : [{ id: 'showGradleOutput', label: 'Open Gradle Output' }];
+  if (commandHints.length > 0 && !fixSuggestions.some(fix => fix.id === 'copyFixCommand')) {
+    fixSuggestions.unshift({ id: 'copyFixCommand', label: 'Copy Fix Command' });
+  }
   return {
     success: false,
     message: fallbackMessage,
-    gradleError: issueToMultiline(issue),
-    fixSuggestions: fixes.length > 0 ? fixes : [{ id: 'showGradleOutput', label: 'Open Gradle Output' }],
+    gradleError,
+    fixSuggestions,
   };
+}
+function firstReadableLine(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const lines = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  return lines.find(line => !/^(\*|>|at\s)/.test(line)) || lines[0];
+}
+function extractCommandCandidates(text: string | undefined): string[] {
+  if (!text) {
+    return [];
+  }
+  const commands = new Set<string>();
+  const backtickRegex = /`([^`]+)`/g;
+  let match: RegExpExecArray | null;
+  while ((match = backtickRegex.exec(text)) !== null) {
+    const candidate = match[1].trim();
+    if (candidate.length >= 3 && /[\s/-]|^\.\//.test(candidate)) {
+      commands.add(candidate);
+    }
+  }
+  const lineRegex = /(^|\n)\s*(\.\/gradlew[^\n]*|gradle[^\n]*|sdkmanager[^\n]*|adb[^\n]*|export\s+JAVA_HOME=[^\n]*)/g;
+  while ((match = lineRegex.exec(text)) !== null) {
+    const candidate = match[2].trim();
+    if (candidate) {
+      commands.add(candidate);
+    }
+  }
+  return Array.from(commands).slice(0, 6);
+}
+function gradleReasonMetaSummary(): { why?: string; suggestions: string[] } {
+  const reason = normalizeErrorReason(lastGradleErrorTags[0]);
+  const meta = ERROR_REASON_META[reason];
+  const suggestions = [
+    meta.autoFix,
+    meta.manualFix,
+  ].filter(Boolean);
+  const why = firstReadableLine(lastGradleErrorSummary) || meta.why;
+  return { why, suggestions };
+}
+function defaultBugSuggestions(): string[] {
+  return [
+    'Open "Android: Open Run Failure Report" for grouped diagnostics.',
+    'Open "Android: Open Action Replay Report" to attach reproduce steps.',
+    'Run "Android: Collect Diagnostics Snapshot" before creating a bug report.',
+  ];
+}
+function knownErrorTips(errorText: string): { why?: string; suggestions: string[]; actions: Array<{ label: string; action: () => Promise<void> | void }> } {
+  const lower = errorText.toLowerCase();
+  if (/android sdk not found|sdk location not found|sdk\.dir is missing/.test(lower)) {
+    return {
+      why: 'Android SDK path is missing or invalid.',
+      suggestions: [
+        'Set `ANDROID_SDK_ROOT` or `ANDROID_HOME`.',
+        'Set sdk.dir in local.properties for this project.',
+        'Run "Android: Gradle Doctor" to validate SDK components.',
+      ],
+      actions: [
+        {
+          label: 'Gradle Doctor',
+          action: async () => vscode.commands.executeCommand('android-toolkit.gradleDoctor'),
+        },
+        {
+          label: 'SDK Setup Guide',
+          action: async () => {
+            await vscode.env.openExternal(vscode.Uri.parse('https://developer.android.com/studio#command-tools'));
+          },
+        },
+      ],
+    };
+  }
+  if (/illegalargumentexception:\s*25\.0\.1|what went wrong:\s*25\.0\.1|kotlincoreenvironment|kotlinlanguageserver/.test(lower)) {
+    return {
+      why: 'JDK runtime mismatch (Java 25 known incompatibility with parts of Kotlin tooling).',
+      suggestions: [
+        'Run "Android: Use JDK 21 Path".',
+        'Reload VS Code window after changing JDK path.',
+        'Verify `JAVA_HOME` points to JDK 17 or 21 for this workspace.',
+      ],
+      actions: [
+        {
+          label: 'Use JDK 21',
+          action: async () => vscode.commands.executeCommand('android-toolkit.setJdk21Path'),
+        },
+        {
+          label: 'Reload Window',
+          action: async () => vscode.commands.executeCommand('workbench.action.reloadWindow'),
+        },
+      ],
+    };
+  }
+  if (/device unauthorized|unauthorized|device offline|no devices|device not found/.test(lower)) {
+    return {
+      why: 'ADB cannot reach a valid online device.',
+      suggestions: [
+        'Accept ADB authorization dialog on device if shown.',
+        'Start an emulator or reconnect USB device.',
+        'Run "Android: Select Device" to refresh selection.',
+      ],
+      actions: [
+        {
+          label: 'Select Device',
+          action: async () => vscode.commands.executeCommand('android-toolkit.selectDevice'),
+        },
+        {
+          label: 'Start Emulator',
+          action: async () => vscode.commands.executeCommand('android-toolkit.startEmulator'),
+        },
+      ],
+    };
+  }
+  return {
+    why: firstReadableLine(errorText),
+    suggestions: defaultBugSuggestions(),
+    actions: [
+      {
+        label: 'Run Failure Report',
+        action: async () => vscode.commands.executeCommand('android-toolkit.openRunFailureReport'),
+      },
+      {
+        label: 'Collect Diagnostics',
+        action: async () => vscode.commands.executeCommand('android-toolkit.collectDiagnosticsSnapshot'),
+      },
+    ],
+  };
+}
+async function showInstallFailureMessage(): Promise<void> {
+  const meta = gradleReasonMetaSummary();
+  const commandHints = extractCommandCandidates([lastGradleErrorSummary, ...meta.suggestions].join('\n'));
+  await showActionableError({
+    title: 'Failed to install app.',
+    why: meta.why || 'Install stage failed in Gradle/ADB pipeline.',
+    suggestions: [
+      ...meta.suggestions,
+      'Open Android Gradle Output for raw logs and task context.',
+    ],
+    fixCommands: commandHints,
+    actions: [
+      {
+        label: 'Open Gradle Output',
+        action: async () => vscode.commands.executeCommand('android-toolkit.showGradleOutput'),
+      },
+      {
+        label: 'Gradle Doctor',
+        action: async () => vscode.commands.executeCommand('android-toolkit.gradleDoctor'),
+      },
+    ],
+  });
 }
 function handleError(error: unknown): void {
   if (error instanceof AndroidToolsError) {
-    showToolkitError(error);
-  } else if (error instanceof Error) {
+    const suggestions = [error.suggestion, ...defaultBugSuggestions()].filter(Boolean) as string[];
     void showActionableError({
-      title: error.message,
-      suggestions: [
-        'Open "Android: Open Run Failure Report" for diagnostics.',
-        'Open "Android: Open Action Replay Report" to attach reproduce steps.',
-      ],
+      title: error.userMessage || 'Android Tools operation failed.',
+      why: firstReadableLine(error.message),
+      suggestions,
+      fixCommands: extractCommandCandidates([error.message, ...suggestions].join('\n')),
       actions: [
+        {
+          label: 'Collect Diagnostics',
+          action: async () => vscode.commands.executeCommand('android-toolkit.collectDiagnosticsSnapshot'),
+        },
         {
           label: 'Run Failure Report',
           action: async () => vscode.commands.executeCommand('android-toolkit.openRunFailureReport'),
         },
+      ],
+    });
+  } else if (error instanceof Error) {
+    const tips = knownErrorTips(error.message);
+    void showActionableError({
+      title: 'Operation failed.',
+      why: tips.why,
+      suggestions: tips.suggestions,
+      fixCommands: extractCommandCandidates([error.message, ...tips.suggestions].join('\n')),
+      actions: tips.actions,
+    });
+  } else {
+    void showActionableError({
+      title: 'Unexpected error occurred.',
+      suggestions: defaultBugSuggestions(),
+      actions: [
         {
-          label: 'Action Replay',
-          action: async () => vscode.commands.executeCommand('android-toolkit.openActionReplayReport'),
+          label: 'Collect Diagnostics',
+          action: async () => vscode.commands.executeCommand('android-toolkit.collectDiagnosticsSnapshot'),
         },
       ],
     });
-  } else {
-    showError('An unexpected error occurred.');
   }
 }
 function getRunConfigurations(): RunConfiguration[] {
@@ -1086,6 +1269,7 @@ async function saveCurrentPanelLayoutCommand(): Promise<void> {
 }
 function settingsCenterKeys(): string[] {
   return [
+    'projectView.mode',
     'ui.mode',
     'ui.density',
     'ui.fontSize',
@@ -1595,13 +1779,21 @@ async function withActionReplay<T>(action: string, args: unknown, fn: () => Prom
   }
 }
 async function openActionReplayReport(): Promise<void> {
+  const lines = buildActionReplayLines();
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: lines.join('\n'),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+function buildActionReplayLines(limit = 120): string[] {
   const lines: string[] = [];
   lines.push('# Android Tools Action Replay');
   lines.push('');
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Records: ${actionReplay.length}`);
   lines.push('');
-  actionReplay.slice(0, 120).forEach((item, index) => {
+  actionReplay.slice(0, limit).forEach((item, index) => {
     lines.push(`${index + 1}. ${item.success ? '[OK]' : '[FAIL]'} ${item.action} (${item.durationMs} ms)`);
     lines.push(`   Args: ${item.args}`);
     lines.push(`   At: ${new Date(item.timestamp).toISOString()}`);
@@ -1609,11 +1801,7 @@ async function openActionReplayReport(): Promise<void> {
       lines.push(`   Error: ${item.error}`);
     }
   });
-  const doc = await vscode.workspace.openTextDocument({
-    language: 'markdown',
-    content: lines.join('\n'),
-  });
-  await vscode.window.showTextDocument(doc, { preview: false });
+  return lines;
 }
 async function evaluateConfigPolicy(workspaceRoot: string): Promise<void> {
   const read = readProjectConfig(workspaceRoot);
@@ -1744,6 +1932,66 @@ function pushTimeline(entry: Omit<SessionTimelineEntry, 'id' | 'at'>): void {
 }
 function listTimeline(limit = 120): SessionTimelineEntry[] {
   return sessionTimeline.slice(0, limit);
+}
+function getLastFailedTimelineEntry(): SessionTimelineEntry | undefined {
+  return sessionTimeline.find(entry => entry.status === 'failed');
+}
+async function openFileLocation(file: string, line: number, column = 1): Promise<boolean> {
+  try {
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    const editor = await vscode.window.showTextDocument(doc, { preview: false });
+    const pos = new vscode.Position(Math.max(0, line - 1), Math.max(0, column - 1));
+    editor.selection = new vscode.Selection(pos, pos);
+    editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function openLastFailedStepCommand(): Promise<void> {
+  const failed = getLastFailedTimelineEntry();
+  if (!failed) {
+    showInfo('No failed step found in current session timeline.');
+    return;
+  }
+  const meta = gradleReasonMetaSummary();
+  const title = `Last failed step: ${failed.action} / ${failed.stage}`;
+  const why = [failed.message, meta.why].filter(Boolean).join(' | ');
+  const errorLocation = lastGradleErrorLocation;
+  const locationAction = errorLocation
+    ? {
+      label: 'Open Source Location',
+      action: async () => {
+        await openFileLocation(
+          errorLocation.file,
+          errorLocation.line,
+          errorLocation.column || 1
+        );
+      },
+    }
+    : {
+      label: 'Run Failure Report',
+      action: async () => {
+        await vscode.commands.executeCommand('android-toolkit.openRunFailureReport');
+      },
+    };
+  await showActionableError({
+    title,
+    why,
+    suggestions: [
+      ...meta.suggestions,
+      `Context: module=${failed.moduleName || '-'} variant=${failed.variant || '-'} device=${failed.deviceId || '-'}`,
+      'Open Android Gradle Output for full logs and stacktrace.',
+    ],
+    fixCommands: extractCommandCandidates([lastGradleErrorSummary, failed.message, ...meta.suggestions].filter(Boolean).join('\n')),
+    actions: [
+      {
+        label: 'Open Gradle Output',
+        action: async () => vscode.commands.executeCommand('android-toolkit.showGradleOutput'),
+      },
+      locationAction,
+    ],
+  });
 }
 async function getAvailableVariants(workspaceRoot: string, moduleName: string): Promise<string[]> {
   const tasks = await listGradleTasks(workspaceRoot);
@@ -2193,7 +2441,26 @@ async function installVariant(
             return false;
           }
           if (gradleMessage) {
-            showError(`Gradle build failed: ${gradleMessage}`);
+            const summary = summarizeGradleError(gradleMessage);
+            const meta = gradleReasonMetaSummary();
+            void showActionableError({
+              title: `Gradle build failed for ${moduleName}:${variant}.`,
+              why: firstReadableLine(summary) || firstReadableLine(gradleMessage),
+              suggestions: [
+                ...meta.suggestions,
+                'Open Android Gradle Output to inspect full stacktrace.',
+              ],
+              actions: [
+                {
+                  label: 'Open Gradle Output',
+                  action: async () => vscode.commands.executeCommand('android-toolkit.showGradleOutput'),
+                },
+                {
+                  label: 'Select Variant',
+                  action: async () => vscode.commands.executeCommand('android-toolkit.selectBuildVariant'),
+                },
+              ],
+            });
           }
           lastGradleErrorSummary = summarizeGradleError(gradleMessage);
           lastGradleErrorLocation = extractErrorLocation(gradleMessage, workspaceRoot);
@@ -2236,7 +2503,7 @@ async function installVariant(
 async function runAppOnTarget(workspaceRoot: string, moduleName: string, variant: string, deviceId: string): Promise<void> {
   const installed = await installVariant(workspaceRoot, moduleName, variant, deviceId);
   if (!installed) {
-    showError('Failed to install app. Check Gradle output or APK build logs for details.');
+    await showInstallFailureMessage();
     return;
   }
   let packageName = findApplicationId(workspaceRoot, moduleName);
@@ -2328,7 +2595,8 @@ async function exportRunArtifactsBundle(
   workspaceRoot: string,
   moduleName: string,
   variant: string,
-  deviceId: string
+  deviceId: string,
+  options?: { includeDiagnostics?: boolean }
 ): Promise<RunActionResult> {
   if (!deviceId) {
     return { success: false, message: 'Select a device first.' };
@@ -2405,6 +2673,17 @@ async function exportRunArtifactsBundle(
           2
         )
       );
+      if (options?.includeDiagnostics !== false) {
+        progress.report({ increment: 10, message: 'Collecting diagnostics snapshot…' });
+        const diagnosticsLines = await buildDiagnosticsSnapshotLines();
+        zip.file('diagnostics.md', diagnosticsLines.join('\n'));
+        zip.file('run-failure-report.md', buildRunFailureReport(runFailureRecords));
+        zip.file('action-replay.md', buildActionReplayLines(160).join('\n'));
+        zip.file(
+          'session-timeline.json',
+          JSON.stringify(listTimeline(240), null, 2)
+        );
+      }
       progress.report({ increment: 10, message: 'Compressing zip…' });
       const content = await zip.generateAsync(
         { type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 } },
@@ -2418,6 +2697,36 @@ async function exportRunArtifactsBundle(
     }
   );
   return { success: true, message: `Run artifacts bundle exported: ${saveUri.fsPath}` };
+}
+async function exportDiagnosticsBundleCommand(): Promise<void> {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const workspaceRoot = workspaceFolder.uri.fsPath;
+  const moduleName = (await getSelectedModule()) || (await selectModule(workspaceRoot));
+  if (!moduleName) {
+    showWarning('No module selected.');
+    return;
+  }
+  const variant = await getSelectedVariant(moduleName);
+  let deviceId = await getSelectedDeviceId();
+  if (!deviceId) {
+    const devices = await listDevicesDetailed();
+    const online = devices.filter(device => device.status === 'online');
+    if (online.length === 0) {
+      showWarning('No online devices found.');
+      return;
+    }
+    const picked = online.length === 1 ? online[0] : await pickDevice(online, { title: 'Select Device for Diagnostics Bundle' });
+    if (!picked) {
+      return;
+    }
+    deviceId = picked.id;
+  }
+  const result = await exportRunArtifactsBundle(workspaceRoot, moduleName, variant, deviceId, { includeDiagnostics: true });
+  result.success ? showInfo(result.message) : showWarning(result.message);
 }
 async function runAppOnEmulator(): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -2696,7 +3005,7 @@ async function executeRunConfiguration(config: RunConfiguration, mode: 'run' | '
     env
   );
   if (!installed) {
-    showError('Failed to install app. Check Gradle output for details.');
+    await showInstallFailureMessage();
     return;
   }
   if (config.launchType === 'deeplink' && config.deepLink) {
@@ -2932,6 +3241,291 @@ async function runDeviceMatrix(): Promise<void> {
     output.appendLine('');
   }
 }
+async function executeDeviceFarmPreset(preset: DeviceFarmPreset): Promise<void> {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const workspaceRoot = workspaceFolder.uri.fsPath;
+  const devices = await listDevicesDetailed();
+  const online = devices.filter(device => device.status === 'online');
+  if (online.length === 0) {
+    showWarning('No online devices found.');
+    return;
+  }
+  const selectedDevices = online.filter(device => preset.deviceIds.includes(device.id));
+  if (selectedDevices.length === 0) {
+    showWarning(`Preset "${preset.name}" has no online devices. Reconfigure preset or launch devices first.`);
+    return;
+  }
+  const moduleName = preset.moduleName || 'app';
+  const variant = preset.variant || 'Debug';
+  const output = vscode.window.createOutputChannel(`Android Device Farm: ${preset.name}`);
+  output.clear();
+  output.appendLine(`Preset: ${preset.name}`);
+  output.appendLine(`Mode: ${preset.mode}`);
+  output.appendLine(`Module: ${moduleName}`);
+  output.appendLine(`Variant: ${variant}`);
+  output.appendLine(`Devices: ${selectedDevices.map(device => device.id).join(', ')}`);
+  output.appendLine('');
+  let apkPath = '';
+  if (preset.mode === 'install' || preset.mode === 'run' || preset.mode === 'smoke') {
+    const built = await buildVariant(workspaceRoot, moduleName, variant);
+    if (!built) {
+      showError('Device Farm preset build failed.');
+      output.show(true);
+      return;
+    }
+    const foundApk = findLatestApk(workspaceRoot, moduleName, variant);
+    if (!foundApk) {
+      showError(`APK not found for ${moduleName}:${variant}.`);
+      output.show(true);
+      return;
+    }
+    apkPath = foundApk;
+  }
+  const packageName = preset.packageName || findApplicationId(workspaceRoot, moduleName) || '';
+  const runner = preset.runner || '';
+  if (preset.mode === 'tests' && !runner) {
+    showError(`Preset "${preset.name}" requires instrumentation runner.`);
+    return;
+  }
+  if (preset.mode === 'smoke' && !packageName) {
+    showError(`Preset "${preset.name}" requires package name for smoke run.`);
+    return;
+  }
+  const results = await Promise.all(selectedDevices.map(async (device) => {
+    if (preset.mode === 'install') {
+      const install = await installApkWithRetryForDevice(device.id, apkPath);
+      return { deviceId: device.id, ok: install.success, message: install.message };
+    }
+    if (preset.mode === 'run') {
+      const install = await installApkWithRetryForDevice(device.id, apkPath);
+      if (!install.success) {
+        return { deviceId: device.id, ok: false, message: install.message };
+      }
+      if (!packageName) {
+        return { deviceId: device.id, ok: true, message: 'Installed (package name not set, launch skipped).' };
+      }
+      const start = await AdbService.startApp(device.id, packageName);
+      return { deviceId: device.id, ok: start.success, message: start.message };
+    }
+    if (preset.mode === 'smoke') {
+      const install = await installApkWithRetryForDevice(device.id, apkPath);
+      if (!install.success) {
+        return { deviceId: device.id, ok: false, message: install.message };
+      }
+      const start = await AdbService.startApp(device.id, packageName);
+      if (!start.success) {
+        return { deviceId: device.id, ok: false, message: start.message };
+      }
+      const stop = await AdbService.forceStopApp(device.id, packageName);
+      return {
+        deviceId: device.id,
+        ok: stop.success,
+        message: stop.success ? 'Smoke run passed (install/start/stop).' : stop.message,
+      };
+    }
+    const test = await AdbService.runInstrumentation(device.id, runner);
+    return {
+      deviceId: device.id,
+      ok: test.success,
+      message: (test.data || test.message).split('\n').slice(-20).join('\n'),
+    };
+  }));
+  let failed = 0;
+  for (const result of results) {
+    output.appendLine(`${result.ok ? '[OK]' : '[FAIL]'} ${result.deviceId} - ${result.message}`);
+    if (!result.ok) {
+      failed += 1;
+    }
+  }
+  output.show(true);
+  if (failed > 0) {
+    showWarning(`Preset "${preset.name}" finished with ${failed} failure(s).`);
+  } else {
+    showInfo(`Preset "${preset.name}" completed successfully.`);
+  }
+}
+async function configureDeviceFarmPresetCommand(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const existing = getDeviceFarmPresets(extensionContext);
+  const presetPick = await vscode.window.showQuickPick(
+    [
+      ...existing.map(preset => ({
+        label: preset.name,
+        description: `${preset.mode} • ${preset.moduleName}:${preset.variant}`,
+        value: preset,
+      })),
+      { label: 'Create Custom Preset', description: 'Add a new device farm preset', value: undefined as DeviceFarmPreset | undefined },
+    ],
+    { placeHolder: 'Select preset to configure' }
+  );
+  if (!presetPick) {
+    return;
+  }
+  let preset = presetPick.value;
+  if (!preset) {
+    const name = await vscode.window.showInputBox({
+      prompt: 'Preset name',
+      placeHolder: 'Nightly QA',
+      validateInput: (value) => value.trim().length > 0 ? undefined : 'Preset name is required',
+    });
+    if (!name) {
+      return;
+    }
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `preset-${Date.now()}`;
+    preset = {
+      id: `${id}-${Date.now()}`,
+      name: name.trim(),
+      mode: 'run',
+      moduleName: 'app',
+      variant: 'Debug',
+      deviceIds: [],
+    };
+  }
+  const modePick = await vscode.window.showQuickPick(
+    [
+      { label: 'Install', value: 'install' as const },
+      { label: 'Run', value: 'run' as const },
+      { label: 'Smoke', value: 'smoke' as const },
+      { label: 'Tests', value: 'tests' as const },
+    ],
+    { placeHolder: 'Select preset mode' }
+  );
+  if (!modePick) {
+    return;
+  }
+  const modules = findApplicationModules(workspaceRoot);
+  if (modules.length === 0) {
+    showError('No Android application modules found.');
+    return;
+  }
+  const modulePick = await vscode.window.showQuickPick(
+    modules.map(moduleName => ({ label: moduleName, value: moduleName })),
+    { placeHolder: 'Select preset module' }
+  );
+  if (!modulePick) {
+    return;
+  }
+  const availableVariants = await getAvailableVariants(workspaceRoot, modulePick.value);
+  const variantPick = await vscode.window.showQuickPick(
+    (availableVariants.length > 0 ? availableVariants : ['Debug', 'Release']).map(variant => ({ label: variant, value: variant })),
+    { placeHolder: 'Select preset variant' }
+  );
+  if (!variantPick) {
+    return;
+  }
+  const devices = await listDevicesDetailed();
+  const online = devices.filter(device => device.status === 'online');
+  if (online.length === 0) {
+    showWarning('No online devices found.');
+    return;
+  }
+  const selectedDevices = await vscode.window.showQuickPick(
+    online.map(device => ({
+      label: device.id,
+      description: device.type,
+      picked: preset.deviceIds.includes(device.id),
+      value: device.id,
+    })),
+    { placeHolder: 'Select devices for this preset', canPickMany: true }
+  );
+  if (!selectedDevices || selectedDevices.length === 0) {
+    showWarning('Preset needs at least one device.');
+    return;
+  }
+  let packageName = preset.packageName;
+  if (modePick.value === 'run' || modePick.value === 'smoke') {
+    packageName = await vscode.window.showInputBox({
+      prompt: 'Package name (optional for Run, required for Smoke)',
+      value: preset.packageName || findApplicationId(workspaceRoot, modulePick.value) || '',
+    });
+    if (modePick.value === 'smoke' && !packageName) {
+      showWarning('Smoke mode requires package name.');
+      return;
+    }
+  }
+  let runner = preset.runner;
+  if (modePick.value === 'tests') {
+    runner = await vscode.window.showInputBox({
+      prompt: 'Instrumentation runner',
+      value: preset.runner || 'com.example.test/androidx.test.runner.AndroidJUnitRunner',
+    });
+    if (!runner) {
+      showWarning('Tests mode requires runner.');
+      return;
+    }
+  }
+  const nextPreset: DeviceFarmPreset = {
+    ...preset,
+    mode: modePick.value,
+    moduleName: modulePick.value,
+    variant: variantPick.value,
+    deviceIds: selectedDevices.map(item => item.value),
+    packageName: packageName?.trim() || undefined,
+    runner: runner?.trim() || undefined,
+  };
+  await upsertDeviceFarmPreset(extensionContext, nextPreset);
+  showInfo(`Device Farm preset saved: ${nextPreset.name}`);
+}
+async function runDeviceFarmPresetCommand(presetId?: string): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  const presets = getDeviceFarmPresets(extensionContext);
+  if (presets.length === 0) {
+    showWarning('No device farm presets found. Configure one first.');
+    return;
+  }
+  let preset = presetId ? presets.find(item => item.id === presetId) : undefined;
+  if (!preset) {
+    const pick = await vscode.window.showQuickPick(
+      presets.map(item => ({
+        label: item.name,
+        description: `${item.mode} • ${item.moduleName}:${item.variant} • ${item.deviceIds.length} device(s)`,
+        value: item,
+      })),
+      { placeHolder: 'Select Device Farm preset to run' }
+    );
+    preset = pick?.value;
+  }
+  if (!preset) {
+    return;
+  }
+  await executeDeviceFarmPreset(preset);
+}
+async function deleteDeviceFarmPresetCommand(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  const presets = getDeviceFarmPresets(extensionContext).filter(item => !['qa', 'release', 'smoke'].includes(item.id));
+  if (presets.length === 0) {
+    showWarning('No custom Device Farm presets to delete.');
+    return;
+  }
+  const pick = await vscode.window.showQuickPick(
+    presets.map(item => ({
+      label: item.name,
+      description: `${item.mode} • ${item.moduleName}:${item.variant}`,
+      value: item,
+    })),
+    { placeHolder: 'Select custom preset to delete' }
+  );
+  if (!pick) {
+    return;
+  }
+  await removeDeviceFarmPreset(extensionContext, pick.value.id);
+  showInfo(`Device Farm preset deleted: ${pick.value.name}`);
+}
 async function openAdbShell(): Promise<void> {
   const devices = await listDevicesDetailed();
   const online = devices.filter(d => d.status === 'online');
@@ -3013,6 +3607,27 @@ async function applyRunFixById(fixId: string): Promise<RunActionResult> {
   if (fixId === 'showGradleOutput') {
     revealGradleOutput();
     return { success: true, message: 'Gradle output opened.' };
+  }
+  if (fixId === 'copyFixCommand') {
+    const commands = lastFixCommandHints.length > 0
+      ? lastFixCommandHints
+      : extractCommandCandidates(lastGradleErrorSummary);
+    if (commands.length === 0) {
+      return { success: false, message: 'No fix command available for this error.' };
+    }
+    let command = commands[0];
+    if (commands.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        commands.map(item => ({ label: item })),
+        { placeHolder: 'Select command to copy' }
+      );
+      command = picked?.label || '';
+    }
+    if (!command) {
+      return { success: false, message: 'Copy command canceled.' };
+    }
+    await vscode.env.clipboard.writeText(command);
+    return { success: true, message: 'Fix command copied to clipboard.' };
   }
   if (fixId === 'selectDevice') {
     await selectDeviceCommand();
@@ -3606,6 +4221,15 @@ export function activate(context: vscode.ExtensionContext): void {
     projectProvider.refresh();
   });
   context.subscriptions.push(workspaceWatcher);
+  const projectViewModeWatcher = vscode.workspace.onDidChangeConfiguration(event => {
+    if (!event.affectsConfiguration('androidToolkit.projectView.mode')) {
+      return;
+    }
+    const configured = vscode.workspace.getConfiguration('androidToolkit').get<string>('projectView.mode', 'android');
+    const next = configured === 'files' || configured === 'packages' ? configured : 'android';
+    projectProvider.setViewMode(next);
+  });
+  context.subscriptions.push(projectViewModeWatcher);
   const workspaceFileWatcher = vscode.workspace.createFileSystemWatcher('**/{settings.gradle,settings.gradle.kts,build.gradle,build.gradle.kts,gradle.properties,local.properties}');
   const invalidateFromWorkspaceChange = (): void => {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -3627,6 +4251,28 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.stopEmulator', stopEmulatorCommand),
     vscode.commands.registerCommand('android-toolkit.createEmulator', createEmulatorCommand),
     vscode.commands.registerCommand('android-toolkit.refreshProjectView', () => projectProvider.refresh()),
+    vscode.commands.registerCommand('android-toolkit.setProjectViewMode', async () => {
+      const current = projectProvider.getViewMode();
+      const picked = await vscode.window.showQuickPick(
+        [
+          { label: 'Android', description: 'Logical groups: Manifests / Java / Res / Assets / Gradle', value: 'android' as const },
+          { label: 'Project Files', description: 'Real filesystem tree', value: 'files' as const },
+          { label: 'Packages', description: 'Java/Kotlin package-oriented tree', value: 'packages' as const },
+        ],
+        {
+          placeHolder: `Current mode: ${current}. Select project tree mode`,
+        }
+      );
+      if (!picked) {
+        return;
+      }
+      const target = vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+      await vscode.workspace.getConfiguration('androidToolkit').update('projectView.mode', picked.value, target);
+      projectProvider.setViewMode(picked.value);
+      showInfo(`Project view mode: ${picked.label}`);
+    }),
     vscode.commands.registerCommand('android-toolkit.openInExplorer', (item: ProjectTreeItem) => {
       if (item.data.resourceUri) {
         vscode.commands.executeCommand('revealInExplorer', item.data.resourceUri);
@@ -3669,6 +4315,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.openTemplateGallery', () => {
       openTemplateGallery();
     }),
+    vscode.commands.registerCommand('android-toolkit.projectBlueprintTemplates', () => {
+      runProjectBlueprintTemplatesWizard();
+    }),
     vscode.commands.registerCommand('android-toolkit.setJdk21Path', async () => {
       const ok = await setJdk21Path();
       if (ok) {
@@ -3703,6 +4352,18 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       await openActionReplayReport();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openLastFailedStep', async () => {
+      if (!(await ensureFeatureAllowed('diagnostics'))) {
+        return;
+      }
+      await openLastFailedStepCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.exportDiagnosticsBundle', async () => {
+      if (!(await ensureFeatureAllowed('diagnostics'))) {
+        return;
+      }
+      await exportDiagnosticsBundleCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.releaseQualityGate', async () => {
       await runReleaseQualityGate();
@@ -4629,6 +5290,10 @@ export function activate(context: vscode.ExtensionContext): void {
             await vscode.commands.executeCommand('android-toolkit.firstRunHealthWizard');
             return { success: true, message: 'Health wizard opened.' };
           }
+          if (actionId === 'open-last-failed') {
+            await openLastFailedStepCommand();
+            return { success: true, message: 'Opened last failed step.' };
+          }
           if (actionId === 'crash-repro') {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
             if (!workspaceFolder) {
@@ -4705,6 +5370,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('android-toolkit.releaseFlow', () => {
       runReleaseFlowWizard();
+    }),
+    vscode.commands.registerCommand('android-toolkit.releaseGateWizardPlus', () => {
+      runReleaseGateWizardPlus();
     }),
     vscode.commands.registerCommand('android-toolkit.buildSignedApk', () => {
       buildSignedApk();
@@ -4909,6 +5577,26 @@ export function activate(context: vscode.ExtensionContext): void {
       const { QuickActionsPanel } = lazyLoad<typeof import('./deviceActions/quickActionsPanel')>('./deviceActions/quickActionsPanel');
       QuickActionsPanel.createOrShow();
     }),
+    vscode.commands.registerCommand('android-toolkit.openCrashSymbolicator', () => {
+      CrashSymbolicatorPanel.createOrShow();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openDeepLinkStudio', () => {
+      const { DeepLinkStudioPanel } = lazyLoad<typeof import('./automation/deepLinkStudioPanel')>('./automation/deepLinkStudioPanel');
+      DeepLinkStudioPanel.createOrShow(context);
+    }),
+    vscode.commands.registerCommand('android-toolkit.openAdbMacroRecorder', () => {
+      const { AdbMacroRecorderPanel } = lazyLoad<typeof import('./automation/adbMacroRecorderPanel')>('./automation/adbMacroRecorderPanel');
+      AdbMacroRecorderPanel.createOrShow(context);
+    }),
+    vscode.commands.registerCommand('android-toolkit.openSnapshotScenarioRunner', () => {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        showError('No workspace folder open.');
+        return;
+      }
+      const { SnapshotScenarioRunnerPanel } = lazyLoad<typeof import('./automation/snapshotScenarioRunnerPanel')>('./automation/snapshotScenarioRunnerPanel');
+      SnapshotScenarioRunnerPanel.createOrShow(context, workspaceRoot);
+    }),
     vscode.commands.registerCommand('android-toolkit.openMappingViewer', () => {
       const { MappingViewerPanel } = lazyLoad<typeof import('./mapping/mappingViewerPanel')>('./mapping/mappingViewerPanel');
       MappingViewerPanel.createOrShow();
@@ -4985,6 +5673,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.openManifestEditor', () => {
       openManifestEditor();
     }),
+    vscode.commands.registerCommand('android-toolkit.manifestDiffAssistant', () => {
+      runManifestDiffAssistant();
+    }),
     vscode.commands.registerCommand('android-toolkit.validateResources', () => {
       validateResourcesCommand();
     }),
@@ -4996,6 +5687,18 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('android-toolkit.openResourceByQuery', () => {
       openResourceByQuery();
+    }),
+    vscode.commands.registerCommand('android-toolkit.resourceRefactorTools', () => {
+      openResourceRefactorTools();
+    }),
+    vscode.commands.registerCommand('android-toolkit.bulkRenameResources', () => {
+      bulkRenameResources();
+    }),
+    vscode.commands.registerCommand('android-toolkit.bulkMoveResources', () => {
+      bulkMoveResources();
+    }),
+    vscode.commands.registerCommand('android-toolkit.scanApiCompatibility', () => {
+      runApiCompatibilityScanner();
     }),
     vscode.commands.registerCommand('android-toolkit.jumpToNavDestination', () => {
       jumpToNavigationDestination();
@@ -5144,6 +5847,48 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const { MatrixDashboardPanel } = lazyLoad<typeof import('./matrix/matrixDashboardPanel')>('./matrix/matrixDashboardPanel');
       MatrixDashboardPanel.createOrShow(extensionContext, workspaceRoot);
+    }),
+    vscode.commands.registerCommand('android-toolkit.configureDeviceFarmPresets', () => {
+      if (!isFeatureAllowed('matrix')) {
+        void ensureFeatureAllowed('matrix');
+        return;
+      }
+      configureDeviceFarmPresetCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.runDeviceFarmPreset', () => {
+      if (!isFeatureAllowed('matrix')) {
+        void ensureFeatureAllowed('matrix');
+        return;
+      }
+      runDeviceFarmPresetCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.runDeviceFarmQa', () => {
+      if (!isFeatureAllowed('matrix')) {
+        void ensureFeatureAllowed('matrix');
+        return;
+      }
+      runDeviceFarmPresetCommand('qa');
+    }),
+    vscode.commands.registerCommand('android-toolkit.runDeviceFarmRelease', () => {
+      if (!isFeatureAllowed('matrix')) {
+        void ensureFeatureAllowed('matrix');
+        return;
+      }
+      runDeviceFarmPresetCommand('release');
+    }),
+    vscode.commands.registerCommand('android-toolkit.runDeviceFarmSmoke', () => {
+      if (!isFeatureAllowed('matrix')) {
+        void ensureFeatureAllowed('matrix');
+        return;
+      }
+      runDeviceFarmPresetCommand('smoke');
+    }),
+    vscode.commands.registerCommand('android-toolkit.deleteDeviceFarmPreset', () => {
+      if (!isFeatureAllowed('matrix')) {
+        void ensureFeatureAllowed('matrix');
+        return;
+      }
+      deleteDeviceFarmPresetCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.gradleDoctor', async () => {
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;

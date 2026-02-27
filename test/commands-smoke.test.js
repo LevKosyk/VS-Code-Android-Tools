@@ -27,6 +27,19 @@ test('key commands are contributed and registered', () => {
     'android-toolkit.toggleXmlLivePreview',
     'android-toolkit.generateConstraintSetSnippet',
     'android-toolkit.openLogcat',
+    'android-toolkit.releaseGateWizardPlus',
+    'android-toolkit.openCrashSymbolicator',
+    'android-toolkit.manifestDiffAssistant',
+    'android-toolkit.openDeepLinkStudio',
+    'android-toolkit.openAdbMacroRecorder',
+    'android-toolkit.openSnapshotScenarioRunner',
+    'android-toolkit.projectBlueprintTemplates',
+    'android-toolkit.resourceRefactorTools',
+    'android-toolkit.scanApiCompatibility',
+    'android-toolkit.runDeviceFarmPreset',
+    'android-toolkit.configureDeviceFarmPresets',
+    'android-toolkit.openLastFailedStep',
+    'android-toolkit.exportDiagnosticsBundle',
   ];
   const contributed = new Set((packageJson.contributes.commands || []).map(c => c.command));
   for (const cmd of keyCommands) {

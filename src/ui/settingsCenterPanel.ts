@@ -105,6 +105,7 @@ export class SettingsCenterPanel {
     const vscode = acquireVsCodeApi();
     let values = {};
     let definitions = [
+      { key: 'projectView.mode', label: 'Project View Mode', type: 'select', options: ['android','files','packages'] },
       { key: 'ui.mode', label: 'UI Mode', type: 'select', options: ['beginner','standard','power'] },
       { key: 'ui.density', label: 'Panel Density', type: 'select', options: ['compact','comfortable'] },
       { key: 'ui.fontSize', label: 'Panel Font Size', type: 'number' },

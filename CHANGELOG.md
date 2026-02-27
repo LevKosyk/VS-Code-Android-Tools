@@ -5,31 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: Se
 
 ## [Unreleased]
 ### Added
-- Real-project reliability runner:
-- `scripts/run-real-project-checks.js`
-- `qa/real-projects/projects.sample.json`
-- `qa/real-projects/README.md`
-- Top-10 failure triage playbook:
-- `docs/TOP_10_CRASH_FIXES.md`
-- GitHub bug template for manual feedback loop:
-- `.github/ISSUE_TEMPLATE/bug_report.yml`
-- New scenario GIF assets for Marketplace/README demos:
-- `assets/gifs/scenario-run-debug-cycle.gif`
-- `assets/gifs/scenario-device-launch.gif`
-- `assets/gifs/scenario-xml-live-edit.gif`
+- Resource Refactor Tools with bulk rename/move and project-wide reference updates.
+- Device Farm Presets with built-in (`QA`, `Release`, `Smoke`) and custom matrix runs.
+- API Compatibility Scanner (`minSdk/targetSdk` checks + guided findings report).
+- Project Blueprint Templates (`MVVM`, `Clean`, `Multi-module` scaffold generation).
+- New diagnostics/recovery commands: `Android: Open Last Failed Step`, `Android: Export Diagnostics Bundle`.
 
 ### Changed
-- CI hardening:
-- added VSIX package dry-run artifact build in `.github/workflows/ci.yml`
-- Release scripts:
-- `release:publish:dry-run` and real-project QA command in `package.json`
-- UX micro-polish:
-- reduced repeated status notifications and tightened message throttling in `src/ui/notifications.ts`
-- Documentation updates in `README.md` for:
-- Quick Start,
-- Troubleshooting,
-- Known Limitations,
-- reliability workflow and manual feedback process.
+- Actionable errors now include clearer root-cause text and context-aware suggestions.
+- Added `Copy Fix Command` flow in error prompts and run fix actions.
+- Run Panel now includes `Open Last Failed` and `Copy Error Context` in the error/recovery flow.
+- Diagnostics bundle now includes Gradle output, Logcat snapshot, device info, diagnostics markdown, run failure report, action replay, and session timeline.
+- Quiet mode now suppresses low-signal success/info toast noise while preserving output logs.
+- README command table and troubleshooting map updated for new flows and recovery paths.
+
+### Testing
+- Updated smoke/runtime command coverage for project blueprints, resource refactor tools, API scanner, device farm presets, last-failed-step, and diagnostics bundle.
+- Verified locally: `npm run -s compile`, `npm run -s lint`, `npm test --silent`, `npm run -s test:runtime`.
 
 ## [0.2.3] - 2026-02-17
 ### Added

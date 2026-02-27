@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "Android Tools for VS Code",
   "description": "VS Code Android extension for ADB, emulator/device manager, Logcat, Gradle Run/Debug, APK install, and XML live preview",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "levkosyk",
   "license": "MIT",
   "icon": "assets/logo/logo.png",
@@ -130,6 +130,11 @@
         "command": "android-toolkit.refreshProjectView",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "android-toolkit.setProjectViewMode",
+        "title": "Android: Set Project View Mode",
+        "icon": "$(list-selection)"
       },
       {
         "command": "android-toolkit.openInExplorer",
@@ -416,6 +421,10 @@
         "title": "Android: Release Flow Wizard"
       },
       {
+        "command": "android-toolkit.releaseGateWizardPlus",
+        "title": "Android: Release Gate Wizard+"
+      },
+      {
         "command": "android-toolkit.buildSignedApk",
         "title": "Android: Build Signed APK"
       },
@@ -498,6 +507,26 @@
         "icon": "$(device-mobile)"
       },
       {
+        "command": "android-toolkit.openCrashSymbolicator",
+        "title": "Android: Crash Symbolicator",
+        "icon": "$(symbol-string)"
+      },
+      {
+        "command": "android-toolkit.openDeepLinkStudio",
+        "title": "Android: Deep Link Studio",
+        "icon": "$(link)"
+      },
+      {
+        "command": "android-toolkit.openAdbMacroRecorder",
+        "title": "Android: ADB Macro Recorder",
+        "icon": "$(record)"
+      },
+      {
+        "command": "android-toolkit.openSnapshotScenarioRunner",
+        "title": "Android: Snapshot Scenario Runner",
+        "icon": "$(debug-rerun)"
+      },
+      {
         "command": "android-toolkit.openMappingViewer",
         "title": "Android: Mapping Viewer (Proguard/R8)",
         "icon": "$(file-code)"
@@ -560,6 +589,10 @@
       {
         "command": "android-toolkit.openManifestEditor",
         "title": "Android: Open Manifest Editor"
+      },
+      {
+        "command": "android-toolkit.manifestDiffAssistant",
+        "title": "Android: Manifest Diff Assistant"
       },
       {
         "command": "android-toolkit.validateResources",
@@ -784,12 +817,69 @@
         "command": "android-toolkit.setKeyboardShortcutProfile",
         "title": "Android: Set Keyboard Shortcut Profile",
         "icon": "$(keyboard)"
+      },
+      {
+        "command": "android-toolkit.projectBlueprintTemplates",
+        "title": "Android: Project Blueprint Templates"
+      },
+      {
+        "command": "android-toolkit.resourceRefactorTools",
+        "title": "Android: Resource Refactor Tools"
+      },
+      {
+        "command": "android-toolkit.bulkRenameResources",
+        "title": "Android: Bulk Rename Resources"
+      },
+      {
+        "command": "android-toolkit.bulkMoveResources",
+        "title": "Android: Bulk Move Resources"
+      },
+      {
+        "command": "android-toolkit.scanApiCompatibility",
+        "title": "Android: API Compatibility Scanner"
+      },
+      {
+        "command": "android-toolkit.configureDeviceFarmPresets",
+        "title": "Android: Configure Device Farm Presets"
+      },
+      {
+        "command": "android-toolkit.runDeviceFarmPreset",
+        "title": "Android: Run Device Farm Preset"
+      },
+      {
+        "command": "android-toolkit.runDeviceFarmQa",
+        "title": "Android: Run Device Farm Preset (QA)"
+      },
+      {
+        "command": "android-toolkit.runDeviceFarmRelease",
+        "title": "Android: Run Device Farm Preset (Release)"
+      },
+      {
+        "command": "android-toolkit.runDeviceFarmSmoke",
+        "title": "Android: Run Device Farm Preset (Smoke)"
+      },
+      {
+        "command": "android-toolkit.deleteDeviceFarmPreset",
+        "title": "Android: Delete Device Farm Preset"
+      },
+      {
+        "command": "android-toolkit.openLastFailedStep",
+        "title": "Android: Open Last Failed Step"
+      },
+      {
+        "command": "android-toolkit.exportDiagnosticsBundle",
+        "title": "Android: Export Diagnostics Bundle"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "android-toolkit.refreshProjectView",
+          "when": "view == androidProjectView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "android-toolkit.setProjectViewMode",
           "when": "view == androidProjectView",
           "group": "navigation@2"
         },
@@ -1045,6 +1135,16 @@
           ],
           "default": "beginner",
           "markdownDescription": "Preset UI mode. `beginner` hides complex tools (Matrix/Gradle Intelligence/Diagnostics), `standard` is balanced, `power` shows all advanced tools."
+        },
+        "androidToolkit.projectView.mode": {
+          "type": "string",
+          "enum": [
+            "android",
+            "files",
+            "packages"
+          ],
+          "default": "android",
+          "markdownDescription": "Project tree layout mode. `android` = Android Studio-like logical groups, `files` = full filesystem tree, `packages` = Java/Kotlin package-oriented tree."
         },
         "androidToolkit.config.profile": {
           "type": "string",

@@ -43,6 +43,15 @@ XML live edit with preview feedback:
 5. If run fails, use:
 - `Android: Open Run Failure Report`
 - `Android: Open SLO Dashboard`
+- `Android: Open Last Failed Step`
+- `Android: Export Diagnostics Bundle`
+
+## What Is New (0.2.4 Draft)
+- Resource Refactor Tools: bulk rename/move with automatic reference updates.
+- Device Farm Presets: built-in QA/Release/Smoke and custom preset runs.
+- API Compatibility Scanner: minSdk/targetSdk mismatch checks with guided report.
+- Project Blueprint Templates: MVVM/Clean/Multi-module structure generators.
+- Error UX polish: `Copy Fix Command`, `Copy Error Context`, and quieter low-signal success toasts in quiet mode.
 
 Marketplace and Support
 - Install from VS Code Marketplace (search: `Android Tools for VS Code`).
@@ -60,6 +69,7 @@ Fast Android Runner
 
 Android Project View
 - Manifests, Java and Kotlin, Res, Assets, Gradle
+- View mode switcher (Android / Project Files / Packages) from tree title dropdown
 - Create Kotlin or Java class
 - Create files and folders
 - Rename and delete items
@@ -108,6 +118,8 @@ Run Panel
 - Pinned presets (quick one-click row)
 - Run Panel keyboard: `Enter` = Run, `Cmd/Ctrl + R` = Re-run selected history
 - Runtime health status (Java/Kotlin stability)
+- Open Last Failed Step action (jump back to latest failed stage with context)
+- Copy Error Context button (module/variant/device/error snippet to clipboard)
 - Preflight checks with fix suggestions before run/install/build
 - Auto-recovery for common failures (ADB reconnect, install retry, Gradle daemon retry)
 - Smart device pick from last successful run (module + variant aware)
@@ -181,6 +193,7 @@ Problems View
 - Error Knowledge Base: top errors with root cause, auto-fix/manual-fix, and direct file links
 - Error taxonomy v2: unified normalized reason IDs across diagnostics/reporting/panels
 - Actionable error prompts in extension flows (quick fix actions + suggestion sheet)
+- One-click `Copy Fix Command` in error prompts for terminal-ready recovery commands
 
 Team Features
 - Export/import project config via `.vscode/android-tools.json`
@@ -192,6 +205,7 @@ Matrix Runs
 - Matrix output includes attempt counts
 - Device Lab mode: matrix `Install / Run / Smoke / Tests`
 - Flaky test history by device and runner (dashboard summary)
+- Device Farm Presets: saved QA/Release/Smoke matrices with one-click run
 
 Stability SLO Dashboard
 - Run success rate
@@ -222,6 +236,24 @@ Run Configurations
 - Pre-run tasks, env vars, and Gradle arguments
 - Run/Debug Profiles v2 panel with create/run/debug/duplicate/delete
 - Inline profile edit directly in panel (without reopening dialogs)
+
+Deep Link Studio
+- UI constructor for deep links and intent parameters
+- Runs `am start` intents on selected device
+- Saved deep link scenarios (run/delete)
+
+ADB Macro Recorder
+- Record action sequences (keyevent/tap/swipe/text)
+- Save reusable macros and replay with step delay
+- Device-targeted execution from one panel
+
+Snapshot Scenario Runner
+- Scenario pipeline: load snapshot -> build -> install -> run -> smoke check -> report
+- Saved scenario presets
+- Auto markdown report for each run
+
+Diagnostics Bundle
+- One-click export ZIP with Gradle output, logcat, device info, diagnostics snapshot, run failure report, action replay, and timeline
 
 APK Analyzer (Lite)
 - Total APK size
@@ -308,6 +340,7 @@ Signing and Release
 - VersionCode bump wizard
 - Auto-detect `bundletool.jar` from project/home common locations
 - Release Flow Wizard: Select Variant -> Build -> Sign -> Install/Test
+- Release Gate Wizard+: version bump -> changelog check -> sign -> build -> dry-run publish
 - Release checklist (versionCode/signing/manifest flags)
 
 Manifest and Resource Tools
@@ -315,9 +348,25 @@ Manifest and Resource Tools
 - Basic validation
 - Resource inspector (values)
  - Go to resource by R.string/R.color/R.dimen
+- Resource Refactor Tools: bulk rename/move resources with project-wide reference updates (`@type/name`, `R.type.name`)
  - Manifest editor for activity/service/permission
+- Manifest Diff Assistant: compare manifests between variants/build types with risky flag highlights (`exported`, `debuggable`, permissions)
 - Navigation graph helpers (destination/argument jump + SVG preview)
 - Graph layout with action arrows in SVG preview
+
+API Compatibility Scanner
+- Scan project API usage against module `minSdk/targetSdk`
+- Rule-based detection for risky APIs (permissions/framework classes/manifest attrs)
+- Generates report with quick fix guidance and jump-to-location picks
+
+Project Blueprint Templates
+- MVVM starter scaffold
+- Clean architecture scaffold (domain/data/presentation)
+- Multi-module blueprint structure with generated starter code and docs
+
+Crash Symbolicator
+- Paste obfuscated stacktrace + select `mapping.txt`
+- Deobfuscate directly in panel and open result in editor
 
 XML Authoring (New)
 - Snippet completions for common Android layout views/attrs in `res/layout/*.xml`
@@ -421,6 +470,7 @@ Shortcut:
 | Android: First-Run Health Wizard | Guided setup checks + quick fixes |
 | Android: Open Onboarding v2 | Visual onboarding checklist with one-click fixes |
 | Android: Open Template Gallery | Open visual starter template gallery |
+| Android: Project Blueprint Templates | Generate MVVM/Clean/Multi-module blueprint scaffolds |
 | Android: Run Selected (Quick) | Alias for running selected target |
 | Android: Stop Selected (Quick) | Alias for stopping selected app |
 | Android: Logcat This App (Quick) | Open Logcat and jump to app-focused flow |
@@ -429,6 +479,8 @@ Shortcut:
 | Android: Open Run Failure Report | Show top grouped run/build/install failure reasons |
 | Android: Open Startup Profiler | Show activation phase breakdown and top startup costs |
 | Android: Open Action Replay Report | Export recent actions with args and latency for repro |
+| Android: Open Last Failed Step | Re-open latest failed timeline stage with guided fixes |
+| Android: Export Diagnostics Bundle | Export one ZIP with logs, diagnostics, failure report, and timeline |
 | Android: Run Release Quality Gate | Run compile/lint/tests/release checks before publish |
 | Android: Set UI Mode | Switch Beginner / Standard / Power User UI mode |
 | Android: Apply Config Profile | Apply Solo / Team / CI-heavy / Release defaults |
@@ -475,6 +527,7 @@ Shortcut:
 | Android: Open Gradle Intelligence | Conflict detector + build scan-lite slow task view |
 | Android: Signing Wizard | Generate keystore and setup signing |
 | Android: Release Flow Wizard | Guided variant/build/sign/install release flow |
+| Android: Release Gate Wizard+ | Version bump + changelog check + sign + build + dry-run publish |
 | Android: Build Signed APK | Build release APK |
 | Android: Build Signed AAB | Build release bundle |
 | Android: Refresh Device Explorer | Refresh device files |
@@ -497,15 +550,21 @@ Shortcut:
 | Android: Insert Manifest Template | Insert manifest snippets |
 | Android: Add Manifest Entry | Add activity/service/permission |
 | Android: Open Manifest Editor | Open manifest editor |
+| Android: Manifest Diff Assistant | Compare manifest between variants/build types and highlight risky flags |
 | Android: Validate Resources | Basic res checks |
 | Android: Insert Values Template | Insert values snippets |
 | Android: Resource Inspector | Search resources |
 | Android: Go To Resource (R.) | Jump to values resource |
+| Android: Resource Refactor Tools | Open bulk resource rename/move actions with ref updates |
+| Android: Bulk Rename Resources | Rename selected resources and update references |
+| Android: Bulk Move Resources | Move resources across `res/*` folders and update references |
+| Android: API Compatibility Scanner | Scan API usage against `minSdk/targetSdk` with fix guidance |
 | Android: Jump To Navigation Destination | Jump to destination in navigation graph |
 | Android: Jump To Navigation Argument | Jump to argument in navigation graph |
 | Android: Preview Navigation Graph (SVG) | Render navigation graph overview |
 | Android: Device Quick Actions | Send keys, taps, swipes, text, clipboard |
 | Android: Mapping Viewer (Proguard/R8) | Open mapping.txt and deobfuscate stacktraces |
+| Android: Crash Symbolicator | Symbolicate pasted stacktrace via mapping.txt in dedicated panel |
 | Android: Performance Monitor | Live CPU/memory/graphics polling |
 | Android: Compose Live Preview | Live screenshot-based preview with params |
 | Android: Select Device | Set device for status bar |
@@ -516,6 +575,12 @@ Shortcut:
 | Android: Install APK on Multiple Devices | Install APK on multiple devices |
 | Android: Device Matrix Run | Run app/tests on selected devices |
 | Android: Matrix Dashboard | Unified matrix UI with saved presets + flaky history view |
+| Android: Configure Device Farm Presets | Save/update QA/Release/Smoke/custom matrix presets |
+| Android: Run Device Farm Preset | Run a saved device farm preset |
+| Android: Run Device Farm Preset (QA) | One-click run for QA preset |
+| Android: Run Device Farm Preset (Release) | One-click run for Release preset |
+| Android: Run Device Farm Preset (Smoke) | One-click run for Smoke preset |
+| Android: Delete Device Farm Preset | Remove custom preset |
 | Android: Gradle Doctor | Check and auto-fix Gradle environment issues |
 | Android: Save Emulator Snapshot | Save current emulator snapshot |
 | Android: Load Emulator Snapshot | Load emulator snapshot |
@@ -573,6 +638,16 @@ Optional:
   - If Kotlin server crashes, use JDK 21 and set `JAVA_HOME`
 
 ## Troubleshooting
+Quick fix map:
+
+| Problem | Use in Extension |
+| --- | --- |
+| SDK not found (`Android SDK not found`, `sdk.dir is missing`) | `Android: Gradle Doctor` + `Android: Collect Diagnostics Snapshot` |
+| Kotlin server crash / Java mismatch (`25.0.1`, `KotlinCoreEnvironment`) | `Android: Use JDK 21 Path` then reload VS Code |
+| Device not detected / unauthorized | `Android: Select Device` or `Android: Start Emulator` |
+| Install failed | `Android: Open Last Failed Step` + `Open Gradle Output` + `Copy Fix Command` |
+| Need bug report bundle | `Android: Export Diagnostics Bundle` |
+
 SDK not found:
 - Set `ANDROID_SDK_ROOT` or install SDK via Android command line tools
 

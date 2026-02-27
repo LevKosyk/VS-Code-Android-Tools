@@ -25,6 +25,13 @@ function canShow(kind: 'info' | 'warn' | 'error', message: string): boolean {
 function shouldPopupError(): boolean {
   return getNotificationMode() === 'normal';
 }
+function isLowSignalInfo(message: string): boolean {
+  const text = message.toLowerCase();
+  if (/failed|error|warning|not found|missing|offline|unauthorized/.test(text)) {
+    return false;
+  }
+  return /(opened|saved|copied|created|deleted|cleared|refreshed|updated|applied|executed|completed|finished|started|stopped|loaded)/.test(text);
+}
 function inferCategory(message: string, fallback: NotificationCategory = 'tips'): NotificationCategory {
   const text = message.toLowerCase();
   if (/logcat|adb logcat/.test(text)) {
@@ -76,6 +83,9 @@ export function showInfo(message: string, category?: NotificationCategory): void
   if (!shouldEmit('INFO', resolved)) {
     return;
   }
+  if (getNotificationMode() === 'quiet' && isLowSignalInfo(message)) {
+    return;
+  }
   if (!canShow('info', message)) {
     return;
   }
@@ -118,14 +128,36 @@ export type ActionableErrorPayload = {
   title: string;
   why?: string;
   suggestions?: string[];
+  fixCommands?: string[];
   actions?: ActionableErrorAction[];
 };
+function commandsFromSuggestions(suggestions: string[]): string[] {
+  const found = new Set<string>();
+  for (const item of suggestions) {
+    const text = item || '';
+    const inline = text.match(/`([^`]+)`/g) || [];
+    for (const token of inline) {
+      const candidate = token.replace(/`/g, '').trim();
+      if (candidate) {
+        found.add(candidate);
+      }
+    }
+    const lineCandidate = text.match(/\b(?:\.\/gradlew|gradle|sdkmanager|adb|export\s+JAVA_HOME=)[^.;]*/);
+    if (lineCandidate?.[0]) {
+      found.add(lineCandidate[0].trim());
+    }
+  }
+  return Array.from(found).slice(0, 6);
+}
 export async function showActionableError(payload: ActionableErrorPayload): Promise<void> {
   const why = payload.why?.trim();
   const suggestions = (payload.suggestions || []).filter(Boolean).map(s => s.trim()).filter(Boolean);
+  const fixCommands = (payload.fixCommands || []).map(c => c.trim()).filter(Boolean);
+  const inferredCommands = fixCommands.length > 0 ? fixCommands : commandsFromSuggestions(suggestions);
   const compactMessage = [payload.title.trim(), why ? `Why: ${why}` : ''].filter(Boolean).join(' | ');
   logLine('ERROR', compactMessage);
   suggestions.forEach(s => logLine('ERROR', `Suggestion: ${s}`));
+  inferredCommands.forEach(command => logLine('ERROR', `Fix command: ${command}`));
 
   if (!shouldPopupError()) {
     if (!canShow('error', payload.title)) {
@@ -140,19 +172,42 @@ export async function showActionableError(payload: ActionableErrorPayload): Prom
 
   const actionEntries = (payload.actions || []).slice(0, 2);
   const actionLabels = actionEntries.map(a => a.label);
+  const copyAction = inferredCommands.length > 0 ? 'Copy Fix Command' : '';
   const secondaryAction = suggestions.length > 0 ? 'Show Suggestions' : '';
   const picked = await vscode.window.showErrorMessage(
     payload.title,
-    ...[...actionLabels, secondaryAction].filter(Boolean)
+    ...[...actionLabels, copyAction, secondaryAction].filter(Boolean)
   );
   const idx = picked ? actionLabels.indexOf(picked) : -1;
   if (idx >= 0) {
     await actionEntries[idx].action();
     return;
   }
+  if (picked === copyAction) {
+    let selectedCommand = inferredCommands[0];
+    if (inferredCommands.length > 1) {
+      const commandPick = await vscode.window.showQuickPick(
+        inferredCommands.map(command => ({ label: command })),
+        { placeHolder: 'Select command to copy' }
+      );
+      selectedCommand = commandPick?.label || '';
+    }
+    if (selectedCommand) {
+      await vscode.env.clipboard.writeText(selectedCommand);
+      vscode.window.setStatusBarMessage('Android Tools: Fix command copied to clipboard.', 2500);
+    }
+    return;
+  }
   if (picked === secondaryAction) {
     const doc = await vscode.workspace.openTextDocument({
-      content: ['# Android Tools Fix Suggestions', '', ...suggestions.map(s => `- ${s}`)].join('\n'),
+      content: [
+        '# Android Tools Fix Suggestions',
+        '',
+        ...suggestions.map(s => `- ${s}`),
+        inferredCommands.length > 0 ? '' : '',
+        inferredCommands.length > 0 ? '## Ready Commands' : '',
+        ...inferredCommands.map(command => `- \`${command}\``),
+      ].filter(Boolean).join('\n'),
       language: 'markdown',
     });
     await vscode.window.showTextDocument(doc, { preview: false });

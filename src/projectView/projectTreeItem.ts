@@ -157,6 +157,21 @@ export function createFileNode(
       : vscode.TreeItemCollapsibleState.None
   );
 }
+
+export function createFolderNode(
+  uri: vscode.Uri,
+  name: string,
+  expanded = false
+): ProjectTreeItem {
+  return new ProjectTreeItem(
+    {
+      type: 'folder',
+      resourceUri: uri,
+      label: name,
+    },
+    expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed
+  );
+}
 export function createPackageNode(uri: vscode.Uri, name: string, fullPackage: string): ProjectTreeItem {
   return new ProjectTreeItem(
     {
