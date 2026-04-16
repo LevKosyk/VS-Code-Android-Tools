@@ -33,15 +33,17 @@ export class SloDashboardPanel {
   private getHtml(summary: SloSummary, slowPaths: SlowPathSummaryItem[]): string {
     const formatMs = (value: number): string => value > 0 ? `${value} ms` : '-';
     const budgetRows = summary.commandBudgets.length === 0
-      ? '<tr><td colspan="6">No command latency samples yet.</td></tr>'
+      ? '<tr><td colspan="8">No command latency samples yet.</td></tr>'
       : summary.commandBudgets.map(item =>
           `<tr>
             <td><code>${item.commandId}</code></td>
             <td>${item.sloMs} ms</td>
-            <td>${item.medianMs} ms</td>
+            <td>${item.p50Ms} ms</td>
             <td>${item.p95Ms} ms</td>
+            <td>${item.p99Ms} ms</td>
             <td>${item.samples}</td>
             <td>${item.breaches}</td>
+            <td>${item.breachRatePct}%</td>
           </tr>`).join('');
     const slowRows = slowPaths.length === 0
       ? '<tr><td colspan="6">No slow-stage samples yet.</td></tr>'
@@ -85,7 +87,7 @@ export class SloDashboardPanel {
   <table>
     <thead>
       <tr>
-        <th>Command</th><th>SLO</th><th>Median</th><th>P95</th><th>Samples</th><th>Breaches</th>
+        <th>Command</th><th>SLO</th><th>P50</th><th>P95</th><th>P99</th><th>Samples</th><th>Breaches</th><th>Breach Rate</th>
       </tr>
     </thead>
     <tbody>${budgetRows}</tbody>

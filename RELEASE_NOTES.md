@@ -1,4 +1,56 @@
-# Release 0.2.4
+# Release 0.2.5
+
+### Added
+- AI Intelligence Hub command and consolidated report workflow: `Android: Open AI Intelligence Hub`.
+- AI Crash Triage Hub capabilities:
+- auto-cluster crash patterns by likely root cause (missing mapping/proguard, NPE, resource issues, ABI/native mismatch),
+- confidence scoring per cluster,
+- one-click suggested fix actions with probable file/config hints.
+- Smart Device Test Matrix recommendations from project state:
+- minSdk/targetSdk/ABI/features-aware device recommendations,
+- flaky hotspot analysis,
+- smart smoke run with retry heuristics,
+- PR-ready heatmap export.
+- Release Risk Score flow before release:
+- score from ANR trend, startup regression, mapping drift, permission changes, and test flakiness,
+- block/allow gate behavior,
+- auditable release override command.
+- Startup Performance Guard attribution in Intelligence Hub:
+- p95 startup regression attribution to likely stage/fingerprint,
+- suggested init deferral plan.
+- Policy-as-Code support in Intelligence Hub:
+- local rules discovery via `.android-tools/policy.rules.json|yaml|yml`,
+- drift detection for manifest/gradle/signing constraints,
+- safe auto-fix command for supported rule types.
+- Deep Link Fuzz + Contract Validator pass:
+- generated deep-link cases from nav graph + manifest,
+- replay command for failing/fuzzed deep links on selected device.
+- APK Diff Intelligence heuristics:
+- explain size delta drivers (dex/native/resources),
+- duplication hints and practical shrink/removal guidance.
+- Team Playbooks:
+- saved incident playbook execution flow (`Crash spike`, `Release blocker`, `Device-only bug`) with concise summary output.
+- PR Quality Assistant:
+- changed-file-aware focused checks and grouped recommendations.
+- Observability Bridge:
+- local snapshot correlation from `.android-tools/observability/*.json` with build fingerprint + crash window context.
+- New commands:
+- `android-toolkit.openIntelligenceHub`
+- `android-toolkit.runIntelligenceMatrixSmoke`
+- `android-toolkit.exportIntelligencePrHeatmap`
+- `android-toolkit.approveReleaseRiskOverride`
+- `android-toolkit.enforcePolicyAsCode`
+- `android-toolkit.replayDeepLinkFuzzCase`
+- `android-toolkit.runTeamPlaybook`
+- `android-toolkit.runFocusedPrChecks`
+
+### Changed
+- Extension command layer now persists Intelligence Hub snapshot, release-override approvals, and last matrix heatmap result for iterative workflows.
+- Documentation and command surface aligned to 0.2.5 Intelligence Hub workflow.
+
+### Testing
+- Verified locally: `npm run -s compile`.
+- Verified locally: `node --test test/commands-smoke.test.js`.
 
 ### Added
 - Resource Refactor Tools with bulk rename/move and project-wide reference updates.

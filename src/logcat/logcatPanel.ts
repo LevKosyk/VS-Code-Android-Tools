@@ -18,6 +18,9 @@ export class LogcatPanel {
   private disposables: vscode.Disposable[] = [];
   private pendingEntries: object[] = [];
   private flushTimer: NodeJS.Timeout | undefined;
+  private devicePollTimer: NodeJS.Timeout | undefined;
+  private activeDeviceId: string | undefined;
+  private resumeStreamOnVisible = false;
   private readonly flushIntervalMs = 120;
   private readonly flushBatchSize = 250;
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
@@ -30,7 +33,11 @@ export class LogcatPanel {
       null,
       this.disposables
     );
+    this.panel.onDidChangeViewState(() => {
+      this.handleVisibilityChanged();
+    }, null, this.disposables);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    this.startDevicePolling();
   }
   public static createOrShow(extensionUri: vscode.Uri, context: vscode.ExtensionContext): LogcatPanel {
     const column = vscode.window.activeTextEditor
@@ -283,6 +290,9 @@ export class LogcatPanel {
     await this.applyOnlyThisApp(deviceId);
   }
   private async sendDeviceList(): Promise<void> {
+    if (!this.panel.visible) {
+      return;
+    }
     try {
       const devices = await listDevices();
       this.postMessage({
@@ -302,6 +312,13 @@ export class LogcatPanel {
   }
   private async startStream(deviceId: string): Promise<void> {
     this.stopStream();
+    this.activeDeviceId = deviceId;
+    this.resumeStreamOnVisible = false;
+    if (!this.panel.visible) {
+      this.resumeStreamOnVisible = true;
+      this.postMessage({ type: 'state', state: 'stopped' });
+      return;
+    }
     this.pendingEntries = [];
     this.stream = logcatManager.getStream(deviceId);
     this.stream.setFilter(this.filter);
@@ -349,7 +366,7 @@ export class LogcatPanel {
       this.scheduleEntryFlush();
     }
   }
-  private stopStream(): void {
+  private stopStream(options?: { preserveResumeIntent?: boolean }): void {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = undefined;
@@ -359,6 +376,47 @@ export class LogcatPanel {
       this.stream.removeAllListeners();
       this.stream.stop();
       this.stream = null;
+    }
+    if (!options?.preserveResumeIntent) {
+      this.resumeStreamOnVisible = false;
+    }
+  }
+
+  private startDevicePolling(): void {
+    if (this.devicePollTimer) {
+      return;
+    }
+    this.devicePollTimer = setInterval(() => {
+      if (!this.panel.visible) {
+        return;
+      }
+      void this.sendDeviceList();
+    }, 4000);
+  }
+
+  private stopDevicePolling(): void {
+    if (!this.devicePollTimer) {
+      return;
+    }
+    clearInterval(this.devicePollTimer);
+    this.devicePollTimer = undefined;
+  }
+
+  private handleVisibilityChanged(): void {
+    if (this.panel.visible) {
+      this.startDevicePolling();
+      void this.sendDeviceList();
+      if (this.resumeStreamOnVisible && this.activeDeviceId) {
+        const deviceId = this.activeDeviceId;
+        this.resumeStreamOnVisible = false;
+        void this.startStream(deviceId);
+      }
+      return;
+    }
+    this.stopDevicePolling();
+    if (this.stream && this.activeDeviceId) {
+      this.resumeStreamOnVisible = true;
+      this.stopStream({ preserveResumeIntent: true });
     }
   }
   private setFilter(filter: LogFilter): void {
@@ -892,6 +950,7 @@ export class LogcatPanel {
   }
   public dispose(): void {
     LogcatPanel.currentPanel = undefined;
+    this.stopDevicePolling();
     this.stopStream();
     this.panel.dispose();
     while (this.disposables.length) {

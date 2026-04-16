@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "Android Tools for VS Code",
   "description": "VS Code Android extension for ADB, emulator/device manager, Logcat, Gradle Run/Debug, APK install, and XML live preview",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "publisher": "levkosyk",
   "license": "MIT",
   "icon": "assets/logo/logo.png",
@@ -55,9 +55,6 @@
     "color": "#0f172a",
     "theme": "dark"
   },
-  "activationEvents": [
-    "onStartupFinished"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -287,8 +284,35 @@
         "title": "Android: Collect Diagnostics Snapshot"
       },
       {
+        "command": "android-toolkit.projectDoctor",
+        "title": "Android: Project Doctor (Auto-Fix)"
+      },
+      {
         "command": "android-toolkit.openRunFailureReport",
         "title": "Android: Open Run Failure Report"
+      },
+      {
+        "command": "android-toolkit.openCrashAnrTriage",
+        "title": "Android: Open Crash & ANR Triage",
+        "icon": "$(flame)"
+      },
+      {
+        "command": "android-toolkit.openGradleBottleneckAnalyzer",
+        "title": "Android: Open Gradle Bottleneck Analyzer",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "android-toolkit.saveDeviceStateProfile",
+        "title": "Android: Save Device State Profile"
+      },
+      {
+        "command": "android-toolkit.applyDeviceStateProfile",
+        "title": "Android: Apply Device State Profile"
+      },
+      {
+        "command": "android-toolkit.runTestsWithDeviceStateProfile",
+        "title": "Android: Run Tests with Device State Profile",
+        "icon": "$(beaker)"
       },
       {
         "command": "android-toolkit.openStartupProfiler",
@@ -327,6 +351,68 @@
       {
         "command": "android-toolkit.importTeamConfig",
         "title": "Android: Import Team Project Config"
+      },
+      {
+        "command": "android-toolkit.teamPolicyDriftReport",
+        "title": "Android: Team Policy Drift Report",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "android-toolkit.performanceRegressionGuardrail",
+        "title": "Android: Performance Regression Guardrail",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "android-toolkit.guidedFirstRunSuccessPath",
+        "title": "Android: Guided First Successful Run",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "android-toolkit.whatNext",
+        "title": "Android: What Should I Do Next?",
+        "icon": "$(compass-active)"
+      },
+      {
+        "command": "android-toolkit.openIntelligenceHub",
+        "title": "Android: Open AI Intelligence Hub",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "android-toolkit.runIntelligenceMatrixSmoke",
+        "title": "Android: Run Smart Matrix Smoke",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "android-toolkit.exportIntelligencePrHeatmap",
+        "title": "Android: Export PR Heatmap Comment",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "android-toolkit.approveReleaseRiskOverride",
+        "title": "Android: Approve Release Risk Override"
+      },
+      {
+        "command": "android-toolkit.enforcePolicyAsCode",
+        "title": "Android: Enforce Policy-as-Code"
+      },
+      {
+        "command": "android-toolkit.replayDeepLinkFuzzCase",
+        "title": "Android: Replay Deep Link Fuzz Case"
+      },
+      {
+        "command": "android-toolkit.runTeamPlaybook",
+        "title": "Android: Run Team Incident Playbook",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "android-toolkit.runFocusedPrChecks",
+        "title": "Android: Run Focused PR Checks",
+        "icon": "$(git-pull-request-go-to-changes)"
+      },
+      {
+        "command": "android-toolkit.openTelemetryDashboard",
+        "title": "Android: Open Local Telemetry Dashboard",
+        "icon": "$(pulse)"
       },
       {
         "command": "android-toolkit.selectBuildVariant",
@@ -1306,6 +1392,7 @@
     "test": "npm run compile && node test/run-node-tests.js",
     "test:p0": "npm run compile && node --test test/p0-run-scenarios-smoke.test.js test/commands-smoke.test.js",
     "test:runtime": "npm run compile && node test/vscode/runTest.js",
+    "test:ci-perf-gate": "node scripts/check-ci-perf-budget.js",
     "qa:real-projects": "node scripts/run-real-project-checks.js",
     "release:notes": "node scripts/check-release.js",
     "release:sync-notes": "node scripts/sync-release-notes-from-git.js",

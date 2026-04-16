@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 
 const { parseVariants, listVariantsFromTasks } = require('../out/gradle/gradleService.js');
+const { COMMAND_SLO_MS } = require('../out/insights/commandBudget.js');
 
 const root = path.join(__dirname, '..');
 
@@ -65,4 +66,20 @@ test('perf budget: startup phases count', () => {
     true,
     `Startup phases budget exceeded: ${phases.size} > ${maxStartupPhases}. Phases: ${Array.from(phases).join(', ')}`
   );
+});
+
+test('perf budget: activation time budget constant', () => {
+  const extensionTs = path.join(root, 'src', 'extension.ts');
+  const source = fs.readFileSync(extensionTs, 'utf8');
+  const match = source.match(/const\s+ACTIVATION_BUDGET_MS\s*=\s*(\d+)\s*;/);
+  assert.equal(Boolean(match), true, 'ACTIVATION_BUDGET_MS constant not found');
+  const budgetMs = Number(match[1]);
+  assert.equal(Number.isFinite(budgetMs), true, 'ACTIVATION_BUDGET_MS must be numeric');
+  assert.equal(budgetMs <= 2500, true, `Activation budget too loose: ${budgetMs}ms`);
+});
+
+test('perf budget: first run-panel open latency SLO', () => {
+  const runPanelSlo = COMMAND_SLO_MS['android-toolkit.openRunPanel'];
+  assert.equal(typeof runPanelSlo, 'number', 'Missing command SLO for android-toolkit.openRunPanel');
+  assert.equal(runPanelSlo <= 700, true, `Run panel SLO too loose: ${runPanelSlo}ms`);
 });

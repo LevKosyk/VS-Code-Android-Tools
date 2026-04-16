@@ -8,6 +8,19 @@ export interface TeamProjectConfig {
   androidToolkitSettings?: Record<string, unknown>;
   ui?: Record<string, unknown>;
   behavior?: Record<string, unknown>;
+  teamProfile?: {
+    preferredJdkPath?: string;
+    runRules?: Array<{
+      moduleName: string;
+      defaultDeviceId?: string;
+      defaultVariant?: string;
+      preRunPipeline?: { clean: boolean; assemble: boolean; install: boolean; run: boolean };
+    }>;
+    performanceBudgets?: {
+      activationBudgetMs?: number;
+      commandLatencySloMs?: Record<string, number>;
+    };
+  };
   launchProfiles?: LaunchProfile[];
   matrixPresets?: Array<{ name: string; deviceIds: string[] }>;
   logcatPresets?: Array<{ name: string; filter: { packageName: string; tag: string; level: string } }>;
@@ -17,6 +30,7 @@ export interface TeamProjectConfig {
 const MATRIX_PRESETS_KEY = 'matrixDashboard.presets';
 const LOGCAT_PRESETS_KEY = 'android-tools.logcatPresets';
 const LOGCAT_PINNED_PRESETS_KEY = 'android-tools.logcatPinnedPresets';
+const MODULE_RUN_RULES_KEY = 'android-tools.moduleRunRules';
 const EXPORTABLE_SETTING_KEYS = [
   'notifications.mode',
   'performance.deferBackgroundMonitoring',
@@ -81,6 +95,18 @@ export async function exportTeamConfig(context: vscode.ExtensionContext, workspa
     androidToolkitSettings,
     ui,
     behavior,
+    teamProfile: {
+      preferredJdkPath: String(vscode.workspace.getConfiguration().get('java.jdt.ls.java.home') || ''),
+      runRules: context.globalState.get<Array<{
+        moduleName: string;
+        defaultDeviceId?: string;
+        defaultVariant?: string;
+        preRunPipeline?: { clean: boolean; assemble: boolean; install: boolean; run: boolean };
+      }>>(MODULE_RUN_RULES_KEY, []),
+      performanceBudgets: {
+        activationBudgetMs: 1800,
+      },
+    },
     launchProfiles: readLaunchProfiles(workspaceRoot),
     matrixPresets: context.globalState.get<Array<{ name: string; deviceIds: string[] }>>(MATRIX_PRESETS_KEY, []),
     logcatPresets: context.globalState.get<Array<{ name: string; filter: { packageName: string; tag: string; level: string } }>>(LOGCAT_PRESETS_KEY, []),
@@ -115,6 +141,20 @@ export async function importTeamConfig(context: vscode.ExtensionContext, workspa
       } catch {
         warnings.push(`Failed to apply setting: androidToolkit.${key}`);
       }
+    }
+  }
+
+  if (parsed.teamProfile) {
+    const preferredJdkPath = parsed.teamProfile.preferredJdkPath;
+    if (preferredJdkPath) {
+      try {
+        await vscode.workspace.getConfiguration().update('java.jdt.ls.java.home', preferredJdkPath, vscode.ConfigurationTarget.Global);
+      } catch {
+        warnings.push('Failed to apply team preferred JDK path.');
+      }
+    }
+    if (Array.isArray(parsed.teamProfile.runRules)) {
+      await context.globalState.update(MODULE_RUN_RULES_KEY, parsed.teamProfile.runRules);
     }
   }
 

@@ -1,0 +1,16 @@
+{
+  "maxDeltaPercent": {
+    "activationTotalMs": 20,
+    "firstCommandLatencyMs": 25
+  },
+  "os": {
+    "linux": {
+      "activationTotalMs": 1800,
+      "firstCommandLatencyMs": 900
+    },
+    "macos": {
+      "activationTotalMs": 1900,
+      "firstCommandLatencyMs": 1000
+    }
+  }
+}

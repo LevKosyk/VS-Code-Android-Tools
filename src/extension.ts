@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { detectSdk, isBuildToolsInstalled, isSdkAvailable } from './core/sdkDetector';
+import { clearSdkCache, detectSdk, isBuildToolsInstalled, isSdkAvailable } from './core/sdkDetector';
 import { AndroidToolsError } from './core/errors';
 import { checkLanguageExtensions, ensureLanguageMode, getLanguageHealthStatus, setJdk21Path } from './core/languageSupport';
 import { listDevicesDetailed, listRunningEmulators } from './devices/deviceManager';
@@ -30,6 +30,9 @@ import {
   coldBoot,
   warmBoot,
   wipeData,
+  enableNetwork,
+  disableNetwork,
+  getNetworkStatus,
   toggleNetwork,
   getAvdNameForDevice,
   listSnapshots,
@@ -37,7 +40,6 @@ import {
   loadSnapshot,
 } from './emulatorControl/emulatorCommands';
 import { AdbService, EmulatorService, EmulatorStateService, DEFAULT_LOCATION_PRESETS } from './services';
-import { ProfilerPanel } from './profiler/profilerPanel';
 import { 
   DeviceManagerProvider,
   createDeviceWizard,
@@ -62,7 +64,12 @@ import {
   pickDeviceProfile, 
   inputAvdName 
 } from './ui/quickPicks';
-import { findApplicationId, findApplicationModules, findBuildToolsVersion, findLatestApk } from './core/androidProject';
+import {
+  findApplicationId as findApplicationIdRaw,
+  findApplicationModules as findApplicationModulesRaw,
+  findBuildToolsVersion as findBuildToolsVersionRaw,
+  findLatestApk,
+} from './core/androidProject';
 import { RunPanel } from './run/runPanel';
 import { GradleTasksProvider, runGradleTaskCommand } from './gradle/gradleTasksProvider';
 import { invalidateGradleTaskCache, listGradleTasks, listVariantsFromTasks, parseVariants, runGradleTaskWithResult } from './gradle/gradleService';
@@ -79,8 +86,6 @@ import {
   fixMissingContentDescription,
   fixMissingConstraints,
 } from './layout/xmlDiagnostics';
-import { insertManifestTemplate, validateManifest, openManifestEditor, addManifestEntryFlow } from './projectView/manifestTools';
-import { runManifestDiffAssistant } from './projectView/manifestDiffAssistant';
 import { insertValuesTemplate, validateResources } from './projectView/resourceTools';
 import { openResourceInspector, openResourceByQuery } from './projectView/resourceInspector';
 import { openResourceRefactorTools, bulkMoveResources, bulkRenameResources } from './projectView/resourceRefactorTools';
@@ -106,29 +111,48 @@ import { showGradleOutput, revealGradleOutput, getLastGradleOutputSnapshot } fro
 import { inspectBuildCache } from './gradle/buildCacheInspector';
 import { runGradleDoctor } from './gradle/gradleDoctor';
 import { runDependencyInsight } from './gradle/dependencyInsight';
-import { runApiCompatibilityScanner } from './core/apiCompatibilityScanner';
 import { issueToMultiline, runGuarded, ToolkitIssue } from './core/stability';
 import { operationManager } from './core/operations';
 import { execCommand } from './core/cli';
 import { logPerf } from './core/perf';
 import { BackgroundScheduler } from './core/backgroundScheduler';
-import { StartupProfilerEntry, StartupProfilerPanel } from './ui/startupProfilerPanel';
+import type { StartupProfilerEntry } from './ui/startupProfilerPanel';
 import { readProjectConfig } from './team/projectConfigStore';
 import { AndroidProblemsProvider, AndroidProblemTreeItem } from './problems/problemsProvider';
 import { buildRunFailureReport, classifyGradleFailure, GradleFailureTag, RunFailureRecord } from './run/runDiagnostics';
 import { pickSmartDeviceId } from './run/smartDevice';
 import { ERROR_REASON_META, normalizeErrorReason } from './run/errorTaxonomy';
-import { listManifestLaunchTargets, LaunchTarget } from './run/launchTargets';
+import { listManifestLaunchTargets as listManifestLaunchTargetsRaw, LaunchTarget } from './run/launchTargets';
 import { buildInstallDiffSummary, readApkSnapshot, readInstalledSnapshot, InstallDiffSnapshot } from './run/installDiff';
 import { DeviceFarmPreset, getDeviceFarmPresets, removeDeviceFarmPreset, upsertDeviceFarmPreset } from './matrix/deviceFarmPresets';
 import type { OnboardingCheck } from './ui/onboardingPanel';
-import { FailureInsightsPanel, RunFixAttemptRecord, summarizeFailureInsights } from './insights/failureInsightsPanel';
+import type { RunFixAttemptRecord } from './insights/failureInsightsPanel';
 import { exportTeamConfig, importTeamConfig } from './team/teamSettings';
-import { SloDashboardPanel } from './insights/sloDashboardPanel';
 import { RunActionMetric, SessionRecord, summarizeSlo } from './insights/sloSummary';
-import { CommandLatencyRecord, summarizeCommandBudgets } from './insights/commandBudget';
-import { SlowPathRecord, SlowPathStage, summarizeSlowPaths } from './insights/slowPathMetrics';
-import { CrashSymbolicatorPanel } from './diagnostics/crashSymbolicatorPanel';
+import {
+  CommandLatencyRecord,
+  enforceCommandSloBudgets,
+  summarizeCommandBudgets,
+} from './insights/commandBudget';
+import {
+  SlowPathRecord,
+  SlowPathStage,
+  summarizeSlowPathFingerprints,
+  summarizeSlowPaths,
+} from './insights/slowPathMetrics';
+import {
+  buildIntelligenceHubSnapshot,
+  enforcePolicyAsCode,
+  renderHeatmapComment,
+  renderIntelligenceHubMarkdown,
+  replayDeepLinkCase,
+  runFocusedPrChecks,
+  runPlaybook,
+  runSmartMatrixSmoke,
+  TeamPlaybook,
+  MatrixSmokeResult,
+  ReleaseRiskOverride,
+} from './insights/intelligenceHub';
 let extensionContext: vscode.ExtensionContext | undefined;
 let lastGradleErrorSummary: string | undefined;
 let lastGradleErrorLocation: { file: string; line: number; column?: number } | undefined;
@@ -166,6 +190,15 @@ const STARTUP_PROFILER_TOTAL_KEY = 'startupProfilerTotalMs';
 const ACTION_REPLAY_KEY = 'actionReplay';
 const PANEL_LAYOUTS_KEY = 'panelLayouts';
 const SLOW_PATH_METRICS_KEY = 'slowPathMetrics';
+const CRASH_ANR_RECORDS_KEY = 'crashAnrRecords';
+const GRADLE_BOTTLENECK_HISTORY_KEY = 'gradleBottleneckHistory';
+const DEVICE_STATE_PROFILES_KEY = 'deviceStateProfiles';
+const PERFORMANCE_BASELINE_KEY = 'performanceBaseline';
+const TELEMETRY_LOCAL_OPT_IN_KEY = 'telemetryLocalOptIn';
+const NEXT_ACTION_RECENTS_KEY = 'nextActionRecents';
+const INTELLIGENCE_HUB_SNAPSHOT_KEY = 'intelligenceHub.snapshot';
+const INTELLIGENCE_RELEASE_OVERRIDE_KEY = 'intelligenceHub.releaseOverride';
+const INTELLIGENCE_MATRIX_LAST_RESULT_KEY = 'intelligenceHub.matrixLastResult';
 function lazyLoad<T>(modulePath: string): T {
   return require(modulePath) as T;
 }
@@ -189,6 +222,107 @@ interface RunActionResult {
   fixSuggestions?: RunFixSuggestion[];
   errorLocation?: { file: string; line: number; column?: number };
   installDiff?: { title: string; lines: string[] };
+}
+interface DoctorIssue {
+  id: string;
+  severity: 'error' | 'warning';
+  title: string;
+  details: string;
+  fixId: string;
+  fixLabel: string;
+  autoFixSafe?: boolean;
+}
+interface SmartRunRecommendation {
+  label: string;
+  actionId: string;
+}
+interface SmartRunHealth {
+  state: 'ok' | 'warning' | 'error';
+  message: string;
+  score: number;
+  recommendations: SmartRunRecommendation[];
+}
+interface CrashAnrRecord {
+  id: string;
+  type: 'crash' | 'anr';
+  signature: string;
+  message: string;
+  moduleName: string;
+  deviceId: string;
+  sessionId: string;
+  source: string;
+  timestamp: number;
+}
+interface CrashLikelyFix {
+  label: string;
+  commandId?: string;
+  docUrl?: string;
+}
+interface GradleTaskHotspot {
+  task: string;
+  durationMs: number;
+}
+interface NamedCountHotspot {
+  name: string;
+  count: number;
+}
+interface GradleBottleneckRecord {
+  id: string;
+  task: string;
+  success: boolean;
+  timestamp: number;
+  totalDurationMs: number;
+  slowTasks: GradleTaskHotspot[];
+  pluginHotspots: NamedCountHotspot[];
+  dependencyHotspots: NamedCountHotspot[];
+}
+interface DeviceStateProfile {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  deviceId: string;
+  moduleName?: string;
+  packageName?: string;
+  network: 'enabled' | 'disabled' | 'unknown';
+  batteryLevel: number;
+  batteryStatus: 'unknown' | 'charging' | 'discharging' | 'not-charging' | 'full';
+  locale: string;
+  animations: {
+    window: string;
+    transition: string;
+    animator: string;
+  };
+  grantedPermissions: string[];
+}
+interface PerformanceGuardrailBaseline {
+  capturedAt: number;
+  startupTotalMs: number;
+  commandBudgetSummary: ReturnType<typeof summarizeCommandBudgets>;
+}
+interface TeamPolicyDriftItem {
+  id: string;
+  title: string;
+  expected: string;
+  actual: string;
+  alignAction: () => Promise<void>;
+}
+interface NextActionItem {
+  id: string;
+  label: string;
+  detail: string;
+  hotkey?: string;
+  category?: 'recommended' | 'recent' | 'team';
+}
+interface NextActionModel {
+  recommended: NextActionItem;
+  summary: {
+    state: 'ok' | 'warning' | 'error';
+    headline: string;
+    detail: string;
+  };
+  recents: NextActionItem[];
+  teamRecommended: NextActionItem[];
 }
 interface ModuleRunRule {
   moduleName: string;
@@ -228,7 +362,23 @@ interface ActionReplayRecord {
 }
 const actionReplay: ActionReplayRecord[] = [];
 const slowPathMetrics: SlowPathRecord[] = [];
+const crashAnrRecords: CrashAnrRecord[] = [];
 const policyWarningsShown = new Set<string>();
+const ACTIVATION_BUDGET_MS = 1800;
+const TOP_SLOW_PATH_LIMIT = 12;
+const HEAVY_COMMAND_SLOW_PATH_IDS = new Set<string>([
+  'android-toolkit.openRunPanel',
+  'android-toolkit.runSelectedAlias',
+  'android-toolkit.runAppOnTargetSelected',
+  'android-toolkit.runAppOnEmulator',
+  'android-toolkit.runAppOnDevice',
+  'android-toolkit.gradleSync',
+  'android-toolkit.runLaunchProfile',
+  'android-toolkit.analyzeApk',
+  'android-toolkit.compareApk',
+]);
+const CI_PERF_SNAPSHOT_RELATIVE_PATH = '.artifacts/ci-perf-snapshot.json';
+let diagnosticsDataLoaded = false;
 const RUN_ACTION_IDS = ['build', 'install', 'run', 'stop', 'clean', 'releaseGate'] as const;
 const PREFLIGHT_CACHE_TTL_MS = 2500;
 const preflightCache = new Map<string, { at: number; result: { ok: boolean; message?: string; fixes?: RunFixSuggestion[]; warnings?: string[] } }>();
@@ -693,6 +843,9 @@ async function withCommandBudget<T>(commandId: string, action: () => Promise<T>)
     if (commandId === 'android-toolkit.openRunPanel') {
       trackSlowPathMetric('openRunPanel', durationMs, success);
     }
+    if (HEAVY_COMMAND_SLOW_PATH_IDS.has(commandId)) {
+      trackSlowPathMetric(`command:${commandId}`, durationMs, success);
+    }
     if (commandLatencyMetrics.length > 1000) {
       commandLatencyMetrics.length = 1000;
     }
@@ -700,9 +853,13 @@ async function withCommandBudget<T>(commandId: string, action: () => Promise<T>)
   }
 }
 function trackSlowPathMetric(stage: SlowPathStage, durationMs: number, success: boolean): void {
+  const rounded = Math.max(0, Math.round(durationMs));
+  const bucketMs = rounded <= 250 ? 250 : rounded <= 500 ? 500 : rounded <= 1000 ? 1000 : rounded <= 2500 ? 2500 : 5000;
+  const fingerprint = `${stage}:${success ? 'ok' : 'fail'}:le${bucketMs}`;
   slowPathMetrics.unshift({
     stage,
-    durationMs: Math.max(0, Math.round(durationMs)),
+    fingerprint,
+    durationMs: rounded,
     success,
     timestamp: Date.now(),
   });
@@ -949,6 +1106,185 @@ async function applyOnboardingV2Fix(id: string): Promise<void> {
     return;
   }
 }
+
+async function recordRecentNextAction(item: NextActionItem): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  const current = extensionContext.globalState.get<NextActionItem[]>(NEXT_ACTION_RECENTS_KEY, []);
+  const deduped = [item, ...current.filter(row => row.id !== item.id)].slice(0, 8);
+  await extensionContext.globalState.update(NEXT_ACTION_RECENTS_KEY, deduped);
+}
+
+function getTeamRecommendedNextActions(): NextActionItem[] {
+  return [
+    { id: 'openRunPanel', label: 'Open Run Panel', detail: 'Run on current module/device with health hints.', hotkey: 'Enter', category: 'team' },
+    { id: 'teamPolicyDrift', label: 'Align Team Policy Drift', detail: 'Keep JDK/run rules/settings consistent across team.', hotkey: 'Alt+A', category: 'team' },
+    { id: 'performanceGuardrail', label: 'Run Performance Guardrail', detail: 'Check startup + command latency regressions.', hotkey: 'Mod+Shift+G', category: 'team' },
+    { id: 'openMatrixDashboard', label: 'Open Matrix Dashboard', detail: 'Run test matrix and inspect flaky/failure clusters.', category: 'team' },
+  ];
+}
+
+async function executeNextActionById(actionId: string): Promise<{ success: boolean; message: string }> {
+  const actionMap: Record<string, { label: string; detail: string; run: () => Promise<void> }> = {
+    openRunPanel: {
+      label: 'Open Run Panel',
+      detail: 'Open run controls for module/device/variant execution.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.openRunPanel'),
+    },
+    selectDevice: {
+      label: 'Select Device',
+      detail: 'Choose or re-select a connected device/emulator.',
+      run: async () => selectDeviceCommand(),
+    },
+    startEmulator: {
+      label: 'Start Emulator',
+      detail: 'Start an AVD to get an online target.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.startEmulator'),
+    },
+    openOnboarding: {
+      label: 'Open Onboarding',
+      detail: 'Apply guided setup fixes in one place.',
+      run: async () => openOnboardingV2Panel(true),
+    },
+    guidedFirstRun: {
+      label: 'Guided First Successful Run',
+      detail: 'Follow one next step at a time to first successful run.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.guidedFirstRunSuccessPath'),
+    },
+    teamPolicyDrift: {
+      label: 'Align Team Policy Drift',
+      detail: 'Review and align config drift with team profile.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.teamPolicyDriftReport'),
+    },
+    performanceGuardrail: {
+      label: 'Run Performance Guardrail',
+      detail: 'Compare startup and command latency against baseline.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.performanceRegressionGuardrail'),
+    },
+    openMatrixDashboard: {
+      label: 'Open Matrix Dashboard',
+      detail: 'Execute matrix runs and inspect flaky behavior.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.openMatrixDashboard'),
+    },
+    releaseQualityGate: {
+      label: 'Run Release Quality Gate',
+      detail: 'Run release checks and quality gate workflow.',
+      run: async () => vscode.commands.executeCommand('android-toolkit.releaseQualityGate'),
+    },
+  };
+
+  const target = actionMap[actionId];
+  if (!target) {
+    return { success: false, message: `Unknown next action: ${actionId}` };
+  }
+  await target.run();
+  await recordRecentNextAction({ id: actionId, label: target.label, detail: target.detail, category: 'recent' });
+  return { success: true, message: target.label };
+}
+
+async function buildNextActionModel(): Promise<NextActionModel> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const recent = extensionContext?.globalState.get<NextActionItem[]>(NEXT_ACTION_RECENTS_KEY, []).slice(0, 5) || [];
+  const teamRecommended = getTeamRecommendedNextActions();
+
+  if (!workspaceRoot) {
+    return {
+      recommended: { id: 'openOnboarding', label: 'Open Onboarding', detail: 'Start from guided setup checks.', hotkey: 'Mod+Enter', category: 'recommended' },
+      summary: {
+        state: 'error',
+        headline: 'No workspace is open',
+        detail: 'Open a project folder first, then continue with onboarding.',
+      },
+      recents: recent,
+      teamRecommended,
+    };
+  }
+
+  const checks = await getOnboardingV2Checks();
+  const failingCheck = checks.find(item => !item.ok);
+  if (failingCheck) {
+    const mapping: Record<string, NextActionItem> = {
+      sdk: { id: 'openOnboarding', label: 'Fix SDK Setup', detail: 'Open onboarding and apply SDK setup guidance.', hotkey: 'Alt+N', category: 'recommended' },
+      jdk: { id: 'openOnboarding', label: 'Fix Java Runtime', detail: 'Use onboarding to align to JDK 21-safe setup.', hotkey: 'Alt+N', category: 'recommended' },
+      modules: { id: 'openOnboarding', label: 'Create/Import Android Module', detail: 'Open onboarding and create/import project modules.', hotkey: 'Alt+N', category: 'recommended' },
+      device: { id: 'startEmulator', label: 'Start Emulator', detail: 'Bring an online target up first.', hotkey: 'Alt+D', category: 'recommended' },
+    };
+    const recommended = mapping[failingCheck.id] || { id: 'guidedFirstRun', label: 'Guided First Successful Run', detail: 'Follow one next step to complete setup.', hotkey: 'Mod+Enter', category: 'recommended' };
+    return {
+      recommended,
+      summary: {
+        state: 'warning',
+        headline: 'Setup needs attention',
+        detail: `First blocker: ${failingCheck.title}.`,
+      },
+      recents: recent,
+      teamRecommended,
+    };
+  }
+
+  const modules = findApplicationModules(workspaceRoot);
+  if (modules.length === 0) {
+    return {
+      recommended: { id: 'openOnboarding', label: 'Create Android Project', detail: 'No Android module found in this workspace.', category: 'recommended' },
+      summary: {
+        state: 'error',
+        headline: 'No Android module found',
+        detail: 'Use onboarding to create/import an Android project.',
+      },
+      recents: recent,
+      teamRecommended,
+    };
+  }
+
+  const onlineDevices = (await listDevicesDetailed()).filter(item => item.status === 'online');
+  if (onlineDevices.length === 0) {
+    return {
+      recommended: { id: 'startEmulator', label: 'Start Emulator', detail: 'No online device detected.', hotkey: 'Alt+D', category: 'recommended' },
+      summary: {
+        state: 'warning',
+        headline: 'No online device',
+        detail: 'Start an emulator or connect a physical device.',
+      },
+      recents: recent,
+      teamRecommended,
+    };
+  }
+
+  const drifts = await collectTeamPolicyDrift(workspaceRoot);
+  if (drifts.length > 0) {
+    return {
+      recommended: { id: 'teamPolicyDrift', label: 'Align Team Policy Drift', detail: `${drifts.length} drift item(s) detected.`, hotkey: 'Alt+A', category: 'recommended' },
+      summary: {
+        state: 'warning',
+        headline: 'Team policy drift detected',
+        detail: 'Align local settings before continuing.',
+      },
+      recents: recent,
+      teamRecommended,
+    };
+  }
+
+  return {
+    recommended: { id: 'openRunPanel', label: 'Run App Now', detail: `Ready to run ${modules[0]} on ${onlineDevices[0].id}.`, hotkey: 'Enter', category: 'recommended' },
+    summary: {
+      state: 'ok',
+      headline: 'Environment ready',
+      detail: 'Build + run path is ready. Next step is to execute your target.',
+    },
+    recents: recent,
+    teamRecommended,
+  };
+}
+
+async function openNextActionSurfaceCommand(): Promise<void> {
+  const { NextActionPanel } = lazyLoad<typeof import('./ui/nextActionPanel')>('./ui/nextActionPanel');
+  NextActionPanel.createOrShow({
+    load: async () => buildNextActionModel(),
+    runAction: async (id: string) => executeNextActionById(id),
+  });
+}
+
 async function openOnboardingV2Panel(force = false): Promise<void> {
   if (!extensionContext) {
     return;
@@ -1680,7 +2016,11 @@ function getAutoRetryPolicy(): { enabled: boolean; maxRetries: number } {
   return { enabled, maxRetries };
 }
 let onlineDevicesCache: { at: number; devices: AndroidDevice[] } | undefined;
-const modulesCache = new Map<string, { at: number; modules: string[] }>();
+const modulesCache = new Map<string, { at: number; version: number; modules: string[] }>();
+const applicationIdCache = new Map<string, { at: number; version: number; value: string | undefined }>();
+const buildToolsVersionCache = new Map<string, { at: number; version: number; value: string | undefined }>();
+const launchTargetsCache = new Map<string, { at: number; version: number; targets: LaunchTarget[] }>();
+const moduleScanVersionByWorkspace = new Map<string, number>();
 
 async function listOnlineDevicesCached(ttlMs = 1500): Promise<AndroidDevice[]> {
   const now = Date.now();
@@ -1705,22 +2045,218 @@ function invalidateFastCaches(workspaceRoot?: string): void {
   onlineDevicesCache = undefined;
   preflightCache.clear();
   preflightInFlight.clear();
+  clearSdkCache();
+  invalidateProjectScanCache(workspaceRoot);
+}
+
+function markProjectScanDirty(workspaceRoot: string): void {
+  const next = (moduleScanVersionByWorkspace.get(workspaceRoot) || 0) + 1;
+  moduleScanVersionByWorkspace.set(workspaceRoot, next);
+}
+
+function invalidateProjectScanCache(workspaceRoot?: string): void {
   if (workspaceRoot) {
     modulesCache.delete(workspaceRoot);
+    for (const key of applicationIdCache.keys()) {
+      if (key.startsWith(`${workspaceRoot}::`)) {
+        applicationIdCache.delete(key);
+      }
+    }
+    for (const key of buildToolsVersionCache.keys()) {
+      if (key.startsWith(`${workspaceRoot}::`)) {
+        buildToolsVersionCache.delete(key);
+      }
+    }
+    for (const key of launchTargetsCache.keys()) {
+      if (key.startsWith(`${workspaceRoot}::`)) {
+        launchTargetsCache.delete(key);
+      }
+    }
+    markProjectScanDirty(workspaceRoot);
   } else {
     modulesCache.clear();
+    applicationIdCache.clear();
+    buildToolsVersionCache.clear();
+    launchTargetsCache.clear();
+    moduleScanVersionByWorkspace.clear();
   }
 }
 
-function findApplicationModulesCached(workspaceRoot: string, ttlMs = 4000): string[] {
+function findApplicationModulesCached(workspaceRoot: string, ttlMs = 12000): string[] {
   const now = Date.now();
+  const version = moduleScanVersionByWorkspace.get(workspaceRoot) || 0;
   const cached = modulesCache.get(workspaceRoot);
-  if (cached && now - cached.at <= ttlMs) {
+  if (cached && cached.version === version && now - cached.at <= ttlMs) {
     return cached.modules;
   }
-  const modules = findApplicationModules(workspaceRoot);
-  modulesCache.set(workspaceRoot, { at: now, modules });
+  const startedAt = Date.now();
+  const modules = findApplicationModulesRaw(workspaceRoot);
+  modulesCache.set(workspaceRoot, { at: now, version, modules });
+  trackSlowPathMetric('projectModuleScan', Date.now() - startedAt, true);
   return modules;
+}
+
+function findApplicationModules(workspaceRoot: string): string[] {
+  return findApplicationModulesCached(workspaceRoot);
+}
+
+function findApplicationId(workspaceRoot: string, moduleName: string, ttlMs = 12000): string | undefined {
+  const version = moduleScanVersionByWorkspace.get(workspaceRoot) || 0;
+  const key = `${workspaceRoot}::${moduleName}`;
+  const now = Date.now();
+  const cached = applicationIdCache.get(key);
+  if (cached && cached.version === version && now - cached.at <= ttlMs) {
+    return cached.value;
+  }
+  const value = findApplicationIdRaw(workspaceRoot, moduleName);
+  applicationIdCache.set(key, { at: now, version, value });
+  return value;
+}
+
+function findBuildToolsVersion(workspaceRoot: string, moduleName: string, ttlMs = 12000): string | undefined {
+  const version = moduleScanVersionByWorkspace.get(workspaceRoot) || 0;
+  const key = `${workspaceRoot}::${moduleName}`;
+  const now = Date.now();
+  const cached = buildToolsVersionCache.get(key);
+  if (cached && cached.version === version && now - cached.at <= ttlMs) {
+    return cached.value;
+  }
+  const value = findBuildToolsVersionRaw(workspaceRoot, moduleName);
+  buildToolsVersionCache.set(key, { at: now, version, value });
+  return value;
+}
+
+function listManifestLaunchTargetsCached(workspaceRoot: string, moduleName: string, packageName: string, ttlMs = 8000): LaunchTarget[] {
+  const version = moduleScanVersionByWorkspace.get(workspaceRoot) || 0;
+  const key = `${workspaceRoot}::${moduleName}::${packageName}`;
+  const now = Date.now();
+  const cached = launchTargetsCache.get(key);
+  if (cached && cached.version === version && now - cached.at <= ttlMs) {
+    return cached.targets;
+  }
+  const targets = listManifestLaunchTargetsRaw(workspaceRoot, moduleName, packageName);
+  launchTargetsCache.set(key, { at: now, version, targets });
+  return targets;
+}
+
+function mergeDiagnosticsRows<T extends { timestamp: number }>(
+  persisted: T[],
+  current: T[],
+  key: (value: T) => string,
+  limit: number
+): T[] {
+  const rows = [...current, ...persisted];
+  const map = new Map<string, T>();
+  for (const row of rows) {
+    const k = key(row);
+    const prev = map.get(k);
+    if (!prev || row.timestamp > prev.timestamp) {
+      map.set(k, row);
+    }
+  }
+  return Array.from(map.values())
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, limit);
+}
+
+function ensureDiagnosticsDataLoaded(): void {
+  if (diagnosticsDataLoaded || !extensionContext) {
+    return;
+  }
+  diagnosticsDataLoaded = true;
+  const persistedActionReplay = extensionContext.globalState.get<ActionReplayRecord[]>(ACTION_REPLAY_KEY, []);
+  if (persistedActionReplay.length > 0) {
+    actionReplay.splice(
+      0,
+      actionReplay.length,
+      ...mergeDiagnosticsRows(
+        persistedActionReplay,
+        actionReplay,
+        item => `${item.timestamp}:${item.action}:${item.durationMs}`,
+        300
+      )
+    );
+  }
+  const persistedMetrics = extensionContext.globalState.get<RunActionMetric[]>(RUN_ACTION_METRICS_KEY, []);
+  if (persistedMetrics.length > 0) {
+    runActionMetrics.splice(
+      0,
+      runActionMetrics.length,
+      ...mergeDiagnosticsRows(
+        persistedMetrics,
+        runActionMetrics,
+        item => `${item.timestamp}:${item.action}:${item.durationMs}`,
+        1000
+      )
+    );
+  }
+  const persistedCommandMetrics = extensionContext.globalState.get<CommandLatencyRecord[]>(COMMAND_LATENCY_METRICS_KEY, []);
+  if (persistedCommandMetrics.length > 0) {
+    commandLatencyMetrics.splice(
+      0,
+      commandLatencyMetrics.length,
+      ...mergeDiagnosticsRows(
+        persistedCommandMetrics,
+        commandLatencyMetrics,
+        item => `${item.timestamp}:${item.commandId}:${item.durationMs}`,
+        1000
+      )
+    );
+  }
+  const persistedSlowPaths = extensionContext.globalState.get<SlowPathRecord[]>(SLOW_PATH_METRICS_KEY, []);
+  if (persistedSlowPaths.length > 0) {
+    slowPathMetrics.splice(
+      0,
+      slowPathMetrics.length,
+      ...mergeDiagnosticsRows(
+        persistedSlowPaths,
+        slowPathMetrics,
+        item => `${item.timestamp}:${item.stage}:${item.durationMs}`,
+        2000
+      )
+    );
+  }
+  const persistedFailures = extensionContext.globalState.get<RunFailureRecord[]>(RUN_FAILURE_RECORDS_KEY, []);
+  if (persistedFailures.length > 0) {
+    const normalized = persistedFailures.map(item => ({ ...item, reason: normalizeErrorReason(item.reason) }));
+    runFailureRecords.splice(
+      0,
+      runFailureRecords.length,
+      ...mergeDiagnosticsRows(
+        normalized,
+        runFailureRecords,
+        item => `${item.timestamp}:${item.action}:${item.message}`,
+        500
+      )
+    );
+  }
+  const persistedFixAttempts = extensionContext.globalState.get<RunFixAttemptRecord[]>(RUN_FIX_ATTEMPTS_KEY, []);
+  if (persistedFixAttempts.length > 0) {
+    const normalized = persistedFixAttempts.map(item => ({ ...item, reason: normalizeErrorReason(item.reason) }));
+    runFixAttempts.splice(
+      0,
+      runFixAttempts.length,
+      ...mergeDiagnosticsRows(
+        normalized,
+        runFixAttempts,
+        item => `${item.timestamp}:${item.fixId}:${item.success}`,
+        500
+      )
+    );
+  }
+  const persistedCrashAnr = extensionContext.globalState.get<CrashAnrRecord[]>(CRASH_ANR_RECORDS_KEY, []);
+  if (persistedCrashAnr.length > 0) {
+    crashAnrRecords.splice(
+      0,
+      crashAnrRecords.length,
+      ...mergeDiagnosticsRows(
+        persistedCrashAnr,
+        crashAnrRecords,
+        item => `${item.timestamp}:${item.signature}:${item.type}`,
+        800
+      )
+    );
+  }
 }
 function recordStartupPhase(name: string, startedAtMs: number, activationStartMs: number): void {
   const durationMs = Date.now() - startedAtMs;
@@ -1738,7 +2274,8 @@ async function persistStartupProfiler(): Promise<void> {
   await extensionContext.globalState.update(STARTUP_PROFILER_TOTAL_KEY, startupProfilerTotalMs);
 }
 function openStartupProfilerPanel(): void {
-  StartupProfilerPanel.createOrShow(startupProfilerEntries, startupProfilerTotalMs, summarizeSlowPaths(slowPathMetrics, 8));
+  const { StartupProfilerPanel } = lazyLoad<typeof import('./ui/startupProfilerPanel')>('./ui/startupProfilerPanel');
+  StartupProfilerPanel.createOrShow(startupProfilerEntries, startupProfilerTotalMs, summarizeSlowPaths(slowPathMetrics, TOP_SLOW_PATH_LIMIT));
 }
 async function persistActionReplay(): Promise<void> {
   if (!extensionContext) {
@@ -1831,6 +2368,536 @@ async function evaluateConfigPolicy(workspaceRoot: string): Promise<void> {
       }
     }
   }
+}
+
+async function collectTeamPolicyDrift(workspaceRoot: string): Promise<TeamPolicyDriftItem[]> {
+  const read = readProjectConfig(workspaceRoot);
+  const drifts: TeamPolicyDriftItem[] = [];
+  const teamProfile = read.config.teamProfile;
+  const policy = read.config.policy;
+
+  if (policy?.requiredSettings && typeof policy.requiredSettings === 'object') {
+    const cfg = vscode.workspace.getConfiguration('androidToolkit');
+    for (const [key, expected] of Object.entries(policy.requiredSettings)) {
+      const actual = cfg.get(key);
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        drifts.push({
+          id: `setting:${key}`,
+          title: `Setting drift: androidToolkit.${key}`,
+          expected: JSON.stringify(expected),
+          actual: JSON.stringify(actual),
+          alignAction: async () => {
+            await cfg.update(key, expected, vscode.ConfigurationTarget.WorkspaceFolder);
+          },
+        });
+      }
+    }
+  }
+
+  if (teamProfile?.preferredJdkPath) {
+    const actualJdk = String(vscode.workspace.getConfiguration().get('java.jdt.ls.java.home') || '');
+    if (actualJdk !== teamProfile.preferredJdkPath) {
+      drifts.push({
+        id: 'teamProfile:preferredJdkPath',
+        title: 'Preferred JDK path drift',
+        expected: teamProfile.preferredJdkPath,
+        actual: actualJdk || '(empty)',
+        alignAction: async () => {
+          await vscode.workspace.getConfiguration().update('java.jdt.ls.java.home', teamProfile.preferredJdkPath, vscode.ConfigurationTarget.Global);
+        },
+      });
+    }
+  }
+
+  if (Array.isArray(teamProfile?.runRules)) {
+    for (const expectedRule of teamProfile.runRules) {
+      const actualRule = getModuleRunRule(expectedRule.moduleName);
+      const expectedText = JSON.stringify(expectedRule);
+      const actualText = JSON.stringify(actualRule || {});
+      if (expectedText !== actualText) {
+        drifts.push({
+          id: `teamProfile:runRule:${expectedRule.moduleName}`,
+          title: `Run rule drift for module ${expectedRule.moduleName}`,
+          expected: expectedText,
+          actual: actualText,
+          alignAction: async () => {
+            await saveModuleRunRule(expectedRule as ModuleRunRule);
+          },
+        });
+      }
+    }
+  }
+
+  return drifts;
+}
+
+async function openTeamPolicyDriftReportCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const { TeamPolicyDriftPanel } = lazyLoad<typeof import('./team/teamPolicyDriftPanel')>('./team/teamPolicyDriftPanel');
+  TeamPolicyDriftPanel.createOrShow({
+    load: async () => {
+      const drifts = await collectTeamPolicyDrift(workspaceRoot);
+      return drifts.map(item => ({
+        id: item.id,
+        title: item.title,
+        expected: item.expected,
+        actual: item.actual,
+      }));
+    },
+    alignOne: async (id: string) => {
+      const drifts = await collectTeamPolicyDrift(workspaceRoot);
+      const target = drifts.find(item => item.id === id);
+      if (!target) {
+        showInfo('Selected drift is already aligned.');
+        return;
+      }
+      await target.alignAction();
+      showInfo(`Aligned: ${target.title}`);
+    },
+    alignAll: async () => {
+      const drifts = await collectTeamPolicyDrift(workspaceRoot);
+      if (drifts.length === 0) {
+        showInfo('Team policy drift: none detected.');
+        return;
+      }
+      for (const item of drifts) {
+        await item.alignAction();
+      }
+      showInfo(`Aligned ${drifts.length} drift item(s).`);
+    },
+    openMarkdown: async () => {
+      const drifts = await collectTeamPolicyDrift(workspaceRoot);
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'markdown',
+        content: buildTeamPolicyDriftMarkdown(drifts),
+      });
+      await vscode.window.showTextDocument(doc, { preview: false });
+    },
+  });
+}
+
+function buildTeamPolicyDriftMarkdown(drifts: TeamPolicyDriftItem[]): string {
+  const lines: string[] = [];
+  lines.push('# Team Policy Drift Report');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Drifts: ${drifts.length}`);
+  lines.push('');
+  if (drifts.length === 0) {
+    lines.push('No drift detected.');
+    return lines.join('\n');
+  }
+  lines.push('| Drift | Expected | Actual |');
+  lines.push('| --- | --- | --- |');
+  for (const item of drifts) {
+    lines.push(`| ${escapeMdCell(item.title)} | ${escapeMdCell(item.expected)} | ${escapeMdCell(item.actual)} |`);
+  }
+  return lines.join('\n');
+}
+
+function summarizeCommandBudgetsMap(summary: ReturnType<typeof summarizeCommandBudgets>): Map<string, { p95Ms: number; p99Ms: number; sloMs: number }> {
+  const map = new Map<string, { p95Ms: number; p99Ms: number; sloMs: number }>();
+  for (const row of summary) {
+    map.set(row.commandId, { p95Ms: row.p95Ms, p99Ms: row.p99Ms, sloMs: row.sloMs });
+  }
+  return map;
+}
+
+async function runPerformanceRegressionGuardrailCommand(): Promise<void> {
+  if (!extensionContext) {
+    showError('Extension context not available.');
+    return;
+  }
+  ensureDiagnosticsDataLoaded();
+  const currentSummary = summarizeCommandBudgets(commandLatencyMetrics);
+  const baseline = extensionContext.globalState.get<PerformanceGuardrailBaseline | undefined>(PERFORMANCE_BASELINE_KEY);
+
+  if (!baseline) {
+    const choice = await vscode.window.showQuickPick(['Capture baseline now', 'Cancel'], {
+      placeHolder: 'No performance baseline found',
+    });
+    if (choice !== 'Capture baseline now') {
+      return;
+    }
+    const nextBaseline: PerformanceGuardrailBaseline = {
+      capturedAt: Date.now(),
+      startupTotalMs: startupProfilerTotalMs,
+      commandBudgetSummary: currentSummary,
+    };
+    await extensionContext.globalState.update(PERFORMANCE_BASELINE_KEY, nextBaseline);
+    showInfo('Performance baseline captured. Re-run guardrail after collecting more metrics.');
+    return;
+  }
+
+  const baselineMap = summarizeCommandBudgetsMap(baseline.commandBudgetSummary);
+  const currentMap = summarizeCommandBudgetsMap(currentSummary);
+  const lines: string[] = [];
+  const failures: string[] = [];
+
+  lines.push('# Performance Regression Guardrail');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Baseline captured: ${new Date(baseline.capturedAt).toISOString()}`);
+  lines.push('');
+
+  const startupAllowed = Math.max(1000, Math.round(baseline.startupTotalMs * 1.15));
+  const startupPass = startupProfilerTotalMs <= startupAllowed;
+  lines.push(`Startup total: ${startupProfilerTotalMs} ms (baseline ${baseline.startupTotalMs} ms, allowed <= ${startupAllowed} ms) => ${startupPass ? 'PASS' : 'FAIL'}`);
+  if (!startupPass) {
+    failures.push('Startup total regressed beyond threshold');
+  }
+  lines.push('');
+  lines.push('| Command | Baseline p95 | Current p95 | Baseline p99 | Current p99 | Allowed p95 | Allowed p99 | Result |');
+  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |');
+  for (const [commandId, current] of currentMap.entries()) {
+    const base = baselineMap.get(commandId);
+    if (!base || base.p95Ms <= 0) {
+      continue;
+    }
+    const allowedP95 = Math.max(base.p95Ms, Math.round(base.p95Ms * 1.2));
+    const allowedP99 = Math.max(base.p99Ms, Math.round(base.p99Ms * 1.25));
+    const pass = current.p95Ms <= allowedP95 && current.p99Ms <= allowedP99;
+    lines.push(`| ${commandId} | ${base.p95Ms} | ${current.p95Ms} | ${base.p99Ms} | ${current.p99Ms} | ${allowedP95} | ${allowedP99} | ${pass ? 'PASS' : 'FAIL'} |`);
+    if (!pass) {
+      failures.push(`${commandId} latency regressed (p95/p99)`);
+    }
+  }
+
+  const sloViolations = enforceCommandSloBudgets(currentSummary, { maxBreachRatePct: 15, maxP99OverSloFactor: 1.35, minSamples: 8 });
+  if (sloViolations.length > 0) {
+    lines.push('');
+    lines.push('## SLO Budget Violations');
+    lines.push('');
+    lines.push('| Command | Reason | Samples | Breaches | P95 | P99 | SLO |');
+    lines.push('| --- | --- | ---: | ---: | ---: | ---: | ---: |');
+    for (const item of sloViolations) {
+      lines.push(`| ${item.commandId} | ${escapeMdCell(item.reason)} | ${item.samples} | ${item.breaches} | ${item.p95Ms} | ${item.p99Ms} | ${item.sloMs} |`);
+      failures.push(`${item.commandId} budget violation`);
+    }
+  }
+
+  lines.push('');
+  lines.push(`Overall: ${failures.length === 0 ? 'PASS' : 'FAIL'}`);
+  if (failures.length > 0) {
+    lines.push('');
+    lines.push('## Failures');
+    lines.push('');
+    for (const item of failures) {
+      lines.push(`- ${item}`);
+    }
+  }
+
+  const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content: lines.join('\n') });
+  await vscode.window.showTextDocument(doc, { preview: false });
+  if (failures.length === 0) {
+    showInfo('Performance guardrail passed.');
+  } else {
+    showWarning(`Performance guardrail failed with ${failures.length} regression(s).`);
+  }
+}
+
+async function buildIntelligenceHubSnapshotForWorkspace(workspaceRoot: string) {
+  const releaseOverride = extensionContext?.globalState.get<ReleaseRiskOverride | undefined>(INTELLIGENCE_RELEASE_OVERRIDE_KEY);
+  const snapshot = await buildIntelligenceHubSnapshot({
+    workspaceRoot,
+    crashRecords: crashAnrRecords.map(item => ({
+      type: item.type,
+      signature: item.signature,
+      message: item.message,
+      source: item.source,
+      timestamp: item.timestamp,
+    })),
+    runFailureRecords,
+    slowPathMetrics,
+    startupTotalMs: startupProfilerTotalMs,
+    performanceBaseline: extensionContext?.globalState.get<PerformanceGuardrailBaseline | undefined>(PERFORMANCE_BASELINE_KEY),
+    matrixHistory: extensionContext?.globalState.get('matrixDashboard.history', []),
+    releaseOverride,
+  });
+  await extensionContext?.globalState.update(INTELLIGENCE_HUB_SNAPSHOT_KEY, snapshot);
+  return snapshot;
+}
+
+async function openIntelligenceHubCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  ensureDiagnosticsDataLoaded();
+  const snapshot = await buildIntelligenceHubSnapshotForWorkspace(workspaceRoot);
+  const markdown = renderIntelligenceHubMarkdown(snapshot);
+  const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content: markdown });
+  await vscode.window.showTextDocument(doc, { preview: false });
+  await vscode.commands.executeCommand('markdown.showPreviewToSide', doc.uri);
+}
+
+async function runIntelligenceMatrixSmokeCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const snapshot = extensionContext?.globalState.get<Awaited<ReturnType<typeof buildIntelligenceHubSnapshot>> | undefined>(INTELLIGENCE_HUB_SNAPSHOT_KEY)
+    || await buildIntelligenceHubSnapshotForWorkspace(workspaceRoot);
+
+  if (!snapshot.matrix.packageName) {
+    showWarning('Package name not detected for matrix smoke run. Set applicationId in Gradle first.');
+    return;
+  }
+
+  await withProgress('Android Tools: Running smart matrix smoke', async () => {
+    const result = await runSmartMatrixSmoke(workspaceRoot, snapshot);
+    await extensionContext?.globalState.update(INTELLIGENCE_MATRIX_LAST_RESULT_KEY, result);
+    const failed = result.rows.filter(row => !row.success).length;
+    if (failed === 0) {
+      showInfo(`Smart matrix smoke passed on ${result.rows.length} device(s).`);
+      return;
+    }
+    showWarning(`Smart matrix smoke completed with ${failed} failure(s). Use Export PR Heatmap for details.`);
+  });
+}
+
+async function exportIntelligencePrHeatmapCommand(): Promise<void> {
+  const result = extensionContext?.globalState.get<MatrixSmokeResult | undefined>(INTELLIGENCE_MATRIX_LAST_RESULT_KEY);
+  if (!result) {
+    showWarning('No matrix smoke result found. Run Smart Matrix Smoke first.');
+    return;
+  }
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: renderHeatmapComment(result),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function approveReleaseRiskOverrideCommand(): Promise<void> {
+  const reason = await vscode.window.showInputBox({
+    prompt: 'Enter override reason (auditable)',
+    placeHolder: 'Example: mitigation verified in staging, shipping hotfix',
+    ignoreFocusOut: true,
+  });
+  if (!reason) {
+    return;
+  }
+  const actor = process.env.USER || process.env.USERNAME || 'unknown-user';
+  const override: ReleaseRiskOverride = {
+    approvedAt: Date.now(),
+    approvedBy: actor,
+    reason,
+  };
+  await extensionContext?.globalState.update(INTELLIGENCE_RELEASE_OVERRIDE_KEY, override);
+  showInfo('Release risk override recorded. Re-open Intelligence Hub to refresh gate status.');
+}
+
+async function enforcePolicyAsCodeCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const snapshot = extensionContext?.globalState.get<Awaited<ReturnType<typeof buildIntelligenceHubSnapshot>> | undefined>(INTELLIGENCE_HUB_SNAPSHOT_KEY)
+    || await buildIntelligenceHubSnapshotForWorkspace(workspaceRoot);
+  const result = await enforcePolicyAsCode(workspaceRoot, snapshot);
+  if (result.fixed === 0) {
+    showInfo(result.details[0] || 'No safe policy auto-fixes applied.');
+    return;
+  }
+  showInfo(`Policy enforcement applied ${result.fixed} safe auto-fix(es), ${result.remaining} issue(s) remaining.`);
+}
+
+async function replayDeepLinkFuzzCaseCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const snapshot = extensionContext?.globalState.get<Awaited<ReturnType<typeof buildIntelligenceHubSnapshot>> | undefined>(INTELLIGENCE_HUB_SNAPSHOT_KEY)
+    || await buildIntelligenceHubSnapshotForWorkspace(workspaceRoot);
+  const selectedDevice = await getSelectedDeviceId();
+  const message = await replayDeepLinkCase(snapshot, selectedDevice);
+  if (message.toLowerCase().includes('failed') || message.toLowerCase().includes('no target device')) {
+    showWarning(message);
+    return;
+  }
+  showInfo(message);
+}
+
+async function runTeamPlaybookCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const snapshot = extensionContext?.globalState.get<Awaited<ReturnType<typeof buildIntelligenceHubSnapshot>> | undefined>(INTELLIGENCE_HUB_SNAPSHOT_KEY)
+    || await buildIntelligenceHubSnapshotForWorkspace(workspaceRoot);
+  const picked = await vscode.window.showQuickPick(
+    snapshot.playbooks.map(item => ({ label: item.title, item })),
+    { placeHolder: 'Select incident playbook to run' }
+  );
+  if (!picked) {
+    return;
+  }
+  const summaryLines: string[] = [];
+  for (const step of picked.item.steps) {
+    try {
+      await vscode.commands.executeCommand(step.commandId);
+      summaryLines.push(`- ${step.label}: done`);
+    } catch (error) {
+      summaryLines.push(`- ${step.label}: failed (${String(error)})`);
+      break;
+    }
+  }
+  const recommendations = await runPlaybook(picked.item as TeamPlaybook);
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: [
+      `# Playbook Summary: ${picked.item.title}`,
+      '',
+      ...summaryLines,
+      '',
+      '## Sequence',
+      ...recommendations,
+    ].join('\n'),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function runFocusedPrChecksCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const snapshot = extensionContext?.globalState.get<Awaited<ReturnType<typeof buildIntelligenceHubSnapshot>> | undefined>(INTELLIGENCE_HUB_SNAPSHOT_KEY)
+    || await buildIntelligenceHubSnapshotForWorkspace(workspaceRoot);
+  const lines = await runFocusedPrChecks(workspaceRoot, snapshot);
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: ['# PR Quality Assistant', '', ...lines.map(line => `- ${line}`)].join('\n'),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function openLocalTelemetryDashboardCommand(): Promise<void> {
+  if (!extensionContext) {
+    showError('Extension context not available.');
+    return;
+  }
+  let enabled = extensionContext.globalState.get<boolean>(TELEMETRY_LOCAL_OPT_IN_KEY, false);
+  if (!enabled) {
+    const pick = await vscode.window.showQuickPick(
+      ['Enable local anonymous metrics', 'Not now'],
+      {
+        placeHolder: 'Local-first telemetry dashboard is opt-in and never leaves this machine.',
+      }
+    );
+    if (pick !== 'Enable local anonymous metrics') {
+      return;
+    }
+    enabled = true;
+    await extensionContext.globalState.update(TELEMETRY_LOCAL_OPT_IN_KEY, true);
+  }
+
+  ensureDiagnosticsDataLoaded();
+  const commandSummary = summarizeCommandBudgets(commandLatencyMetrics)
+    .slice()
+    .sort((a, b) => b.samples - a.samples)
+    .slice(0, 20);
+  const slowSummary = summarizeSlowPaths(slowPathMetrics, 20);
+  const slowFingerprintSummary = summarizeSlowPathFingerprints(slowPathMetrics, 20);
+  const failureSummary = runFailureRecords.slice(0, 200);
+
+  const lines: string[] = [];
+  lines.push('# Local Telemetry Dashboard');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push('Mode: local-first, anonymous, opt-in');
+  lines.push('');
+  lines.push('## Command Usage and Latency');
+  lines.push('');
+  lines.push('| Command | Samples | P50 | P95 | P99 | Breaches | Breach Rate |');
+  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: |');
+  for (const row of commandSummary) {
+    lines.push(`| ${row.commandId} | ${row.samples} | ${row.p50Ms} | ${row.p95Ms} | ${row.p99Ms} | ${row.breaches} | ${row.breachRatePct}% |`);
+  }
+  lines.push('');
+  lines.push('## Slow Operations');
+  lines.push('');
+  lines.push('| Stage | Samples | Failures | P95 | Max |');
+  lines.push('| --- | ---: | ---: | ---: | ---: |');
+  for (const row of slowSummary) {
+    lines.push(`| ${row.stage} | ${row.samples} | ${row.failures} | ${row.p95Ms} | ${row.maxMs} |`);
+  }
+  lines.push('');
+  lines.push('## Slow-path Fingerprints');
+  lines.push('');
+  lines.push('| Stage | Fingerprint | Samples | Failures | P95 |');
+  lines.push('| --- | --- | ---: | ---: | ---: |');
+  for (const row of slowFingerprintSummary) {
+    lines.push(`| ${row.stage} | ${escapeMdCell(row.fingerprint)} | ${row.samples} | ${row.failures} | ${row.p95Ms} |`);
+  }
+  lines.push('');
+  lines.push('## Recent Failures');
+  lines.push('');
+  if (failureSummary.length === 0) {
+    lines.push('No failures recorded in recent history.');
+  } else {
+    lines.push('| Action | Reason | When |');
+    lines.push('| --- | --- | --- |');
+    for (const row of failureSummary.slice(0, 20)) {
+      lines.push(`| ${row.action} | ${row.reason} | ${new Date(row.timestamp).toISOString()} |`);
+    }
+  }
+
+  const doc = await vscode.workspace.openTextDocument({ language: 'markdown', content: lines.join('\n') });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function runGuidedFirstSuccessPathCommand(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  let checks = await getOnboardingV2Checks();
+  while (true) {
+    const next = checks.find(item => !item.ok);
+    if (!next) {
+      break;
+    }
+    const choice = await vscode.window.showQuickPick(
+      [
+        `Apply next step: ${next.fixLabel || 'Fix'}`,
+        'Open full onboarding panel',
+        'Stop for now',
+      ],
+      {
+        title: 'Guided first successful run',
+        placeHolder: `${next.title} — ${next.details}`,
+      }
+    );
+    if (!choice || choice === 'Stop for now') {
+      return;
+    }
+    if (choice === 'Open full onboarding panel') {
+      await openOnboardingV2Panel(true);
+      return;
+    }
+    await applyOnboardingV2Fix(next.id);
+    checks = await getOnboardingV2Checks();
+  }
+
+  const test = await runOnboardingTestRun();
+  if (!test.ok) {
+    showWarning(`Guided run reached test step but failed: ${test.message}`);
+    return;
+  }
+  await extensionContext.globalState.update(FIRST_RUN_WIZARD_SUCCESS_KEY, true);
+  await vscode.commands.executeCommand('android-toolkit.openRunPanel');
+  showInfo('Guided checklist completed. First run path is ready.');
 }
 function flattenProjectSection(input: Record<string, unknown>, prefix = ''): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -2118,6 +3185,7 @@ async function buildVariant(
   const task = `:${moduleName}:assemble${variant}`;
   const result = await runGradleTaskWithResult(workspaceRoot, task, gradleArgs, env);
   showGradleOutput(task, result, workspaceRoot);
+  await captureGradleBottlenecks(task, result.exitCode, result.stdout || '', result.stderr || '');
   if (result.exitCode === 0) {
     lastGradleErrorSummary = undefined;
     lastGradleErrorLocation = undefined;
@@ -2284,6 +3352,1143 @@ function findMinSdkVersion(workspaceRoot: string, moduleName: string): number | 
   }
   return undefined;
 }
+
+function readGradleWrapperVersion(workspaceRoot: string): string | undefined {
+  const wrapperPath = path.join(workspaceRoot, 'gradle', 'wrapper', 'gradle-wrapper.properties');
+  if (!fs.existsSync(wrapperPath)) {
+    return undefined;
+  }
+  const content = fs.readFileSync(wrapperPath, 'utf-8');
+  const match = content.match(/distributionUrl=.*gradle-([0-9]+(?:\.[0-9]+){1,2})-/i);
+  return match?.[1];
+}
+
+function compareSemverLike(a: string, b: string): number {
+  const pa = a.split('.').map(n => parseInt(n, 10));
+  const pb = b.split('.').map(n => parseInt(n, 10));
+  const max = Math.max(pa.length, pb.length);
+  for (let i = 0; i < max; i++) {
+    const va = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const vb = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (va !== vb) {
+      return va - vb;
+    }
+  }
+  return 0;
+}
+
+function findSdkManagerBinary(sdkRoot: string): string | undefined {
+  const cmdlineTools = path.join(sdkRoot, 'cmdline-tools');
+  if (!fs.existsSync(cmdlineTools)) {
+    return undefined;
+  }
+  const dirs = fs.readdirSync(cmdlineTools);
+  const ordered = ['latest', ...dirs.filter(d => d !== 'latest').sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))];
+  for (const dir of ordered) {
+    const candidate = path.join(
+      cmdlineTools,
+      dir,
+      'bin',
+      process.platform === 'win32' ? 'sdkmanager.bat' : 'sdkmanager'
+    );
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function upsertPropertyFile(filePath: string, key: string, value: string): void {
+  const line = `${key}=${value}`;
+  let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
+  if (new RegExp(`^${key}=`, 'm').test(content)) {
+    content = content.replace(new RegExp(`^${key}=.*$`, 'm'), line);
+  } else {
+    content = content.trim() ? `${content.trim()}\n${line}\n` : `${line}\n`;
+  }
+  fs.writeFileSync(filePath, content);
+}
+
+async function evaluateProjectDoctorIssues(workspaceRoot: string): Promise<DoctorIssue[]> {
+  const issues: DoctorIssue[] = [];
+  let sdkRoot = '';
+  try {
+    sdkRoot = detectSdk().root;
+  } catch {
+    issues.push({
+      id: 'sdk.missing',
+      severity: 'error',
+      title: 'Android SDK is not configured',
+      details: 'ANDROID_SDK_ROOT/ANDROID_HOME is missing or invalid.',
+      fixId: 'doctor.openSdkDocs',
+      fixLabel: 'Open SDK Setup Guide',
+    });
+    return issues;
+  }
+
+  const localPropsPath = path.join(workspaceRoot, 'local.properties');
+  const localProps = fs.existsSync(localPropsPath) ? fs.readFileSync(localPropsPath, 'utf-8') : '';
+  const localSdkRaw = localProps.match(/^sdk\.dir=(.+)$/m)?.[1]?.trim();
+  const localSdk = localSdkRaw ? localSdkRaw.replace(/\\:/g, ':').replace(/\\\\/g, '/') : '';
+  if (!localSdk || !fs.existsSync(localSdk)) {
+    issues.push({
+      id: 'local.properties.sdkDir',
+      severity: 'warning',
+      title: 'local.properties sdk.dir is missing or invalid',
+      details: 'Gradle sync can fail when sdk.dir is not set to a valid Android SDK path.',
+      fixId: 'doctor.fixLocalProperties',
+      fixLabel: 'Fix local.properties',
+      autoFixSafe: true,
+    });
+  }
+
+  const platformToolsDir = path.join(sdkRoot, 'platform-tools');
+  const buildToolsDir = path.join(sdkRoot, 'build-tools');
+  const platformsDir = path.join(sdkRoot, 'platforms');
+  const missingSdkComponents =
+    !fs.existsSync(platformToolsDir) ||
+    !fs.existsSync(buildToolsDir) || fs.readdirSync(buildToolsDir).length === 0 ||
+    !fs.existsSync(platformsDir) || fs.readdirSync(platformsDir).length === 0;
+  if (missingSdkComponents) {
+    issues.push({
+      id: 'sdk.components',
+      severity: 'error',
+      title: 'Required SDK components are missing',
+      details: 'platform-tools, platforms, or build-tools are not fully installed.',
+      fixId: 'doctor.installSdkComponents',
+      fixLabel: 'Install Missing SDK Components',
+      autoFixSafe: true,
+    });
+  }
+
+  const languageHealth = await getLanguageHealthStatus();
+  if (languageHealth.kotlinRiskOnJava25) {
+    issues.push({
+      id: 'jdk.kotlinRisk',
+      severity: 'warning',
+      title: 'JDK version can break Kotlin tooling',
+      details: `Java ${languageHealth.javaVersion || languageHealth.javaMajor || 'unknown'} is risky for Kotlin LS.`,
+      fixId: 'doctor.setJdk21',
+      fixLabel: 'Use JDK 21',
+    });
+  }
+
+  const wrapperVersion = readGradleWrapperVersion(workspaceRoot);
+  const javaMajor = Number(languageHealth.javaMajor || 0);
+  if (!wrapperVersion) {
+    issues.push({
+      id: 'gradle.wrapper.missing',
+      severity: 'error',
+      title: 'Gradle wrapper file is missing',
+      details: 'gradle/wrapper/gradle-wrapper.properties was not found.',
+      fixId: 'doctor.runGradleDoctor',
+      fixLabel: 'Open Gradle Doctor',
+    });
+  } else if (javaMajor >= 21 && compareSemverLike(wrapperVersion, '8.4') < 0) {
+    issues.push({
+      id: 'gradle.wrapper.mismatch',
+      severity: 'warning',
+      title: `Gradle wrapper ${wrapperVersion} may be too old for Java ${javaMajor}`,
+      details: 'Upgrade wrapper to a modern Gradle release for stable sync and builds.',
+      fixId: 'doctor.fixGradleWrapper',
+      fixLabel: 'Update Gradle Wrapper',
+      autoFixSafe: true,
+    });
+  }
+
+  return issues;
+}
+
+async function applyProjectDoctorFix(workspaceRoot: string, fixId: string): Promise<RunActionResult> {
+  if (fixId === 'doctor.openSdkDocs') {
+    await vscode.env.openExternal(vscode.Uri.parse('https://developer.android.com/studio#command-tools'));
+    return { success: true, message: 'Opened Android SDK setup guide.' };
+  }
+  if (fixId === 'doctor.runGradleDoctor') {
+    await runGradleDoctor(workspaceRoot);
+    return { success: true, message: 'Gradle Doctor opened.' };
+  }
+  if (fixId === 'doctor.setJdk21') {
+    const ok = await setJdk21Path();
+    return { success: ok, message: ok ? 'JDK path updated.' : 'JDK update canceled.' };
+  }
+  if (fixId === 'doctor.fixLocalProperties') {
+    const sdkRoot = detectSdk().root;
+    const localPropsPath = path.join(workspaceRoot, 'local.properties');
+    const escaped = sdkRoot.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+    upsertPropertyFile(localPropsPath, 'sdk.dir', escaped);
+    return { success: true, message: 'local.properties updated with sdk.dir.' };
+  }
+  if (fixId === 'doctor.fixGradleWrapper') {
+    const wrapperPath = path.join(workspaceRoot, 'gradle', 'wrapper', 'gradle-wrapper.properties');
+    if (!fs.existsSync(wrapperPath)) {
+      return { success: false, message: 'gradle-wrapper.properties not found.' };
+    }
+    const content = fs.readFileSync(wrapperPath, 'utf-8');
+    const next = content.replace(
+      /^distributionUrl=.*$/m,
+      'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-bin.zip'
+    );
+    fs.writeFileSync(wrapperPath, next);
+    return { success: true, message: 'Gradle wrapper updated to 8.7.' };
+  }
+  if (fixId === 'doctor.installSdkComponents') {
+    const sdkRoot = detectSdk().root;
+    const sdkmanager = findSdkManagerBinary(sdkRoot);
+    if (!sdkmanager) {
+      return { success: false, message: 'sdkmanager not found under cmdline-tools.' };
+    }
+    const packages: string[] = [];
+    if (!fs.existsSync(path.join(sdkRoot, 'platform-tools'))) {
+      packages.push('platform-tools');
+    }
+    const buildToolsDir = path.join(sdkRoot, 'build-tools');
+    if (!fs.existsSync(buildToolsDir) || fs.readdirSync(buildToolsDir).length === 0) {
+      packages.push('build-tools;36.0.0');
+    }
+    const platformsDir = path.join(sdkRoot, 'platforms');
+    if (!fs.existsSync(platformsDir) || fs.readdirSync(platformsDir).length === 0) {
+      packages.push('platforms;android-34');
+    }
+    if (packages.length === 0) {
+      return { success: true, message: 'SDK components already installed.' };
+    }
+    const result = await execCommand(sdkmanager, packages, { timeout: 600_000 });
+    return {
+      success: result.exitCode === 0,
+      message: result.exitCode === 0
+        ? `Installed SDK components: ${packages.join(', ')}`
+        : `Failed installing SDK components. ${result.stderr || result.stdout || ''}`,
+    };
+  }
+  return { success: false, message: `Unknown Project Doctor fix: ${fixId}` };
+}
+
+async function runProjectDoctorCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const issues = await evaluateProjectDoctorIssues(workspaceRoot);
+  if (issues.length === 0) {
+    showInfo('Project Doctor: no issues detected.');
+    return;
+  }
+
+  const pick = await vscode.window.showQuickPick(
+    [
+      {
+        label: '$(wrench) Auto-fix all safe issues',
+        description: `${issues.filter(item => item.autoFixSafe).length} safe fix(es)`,
+        issueId: '__auto__',
+      },
+      ...issues.map(issue => ({
+        label: `${issue.severity === 'error' ? '$(error)' : '$(warning)'} ${issue.title}`,
+        description: issue.details,
+        detail: `Fix: ${issue.fixLabel}`,
+        issueId: issue.id,
+      })),
+    ],
+    {
+      title: 'Android Project Doctor',
+      placeHolder: 'Choose an issue to fix or run one-click safe auto-fix',
+      ignoreFocusOut: true,
+    }
+  );
+
+  if (!pick) {
+    return;
+  }
+
+  const channel = vscode.window.createOutputChannel('Android Project Doctor');
+  channel.clear();
+  channel.show(true);
+  channel.appendLine('Android Project Doctor started...');
+
+  const applyIssue = async (issue: DoctorIssue): Promise<void> => {
+    channel.appendLine(`- ${issue.title}`);
+    const result = await applyProjectDoctorFix(workspaceRoot, issue.fixId);
+    channel.appendLine(`  ${result.success ? '[OK]' : '[FAIL]'} ${result.message}`);
+  };
+
+  if (pick.issueId === '__auto__') {
+    const safeIssues = issues.filter(item => item.autoFixSafe);
+    if (safeIssues.length === 0) {
+      showWarning('Project Doctor: no safe auto-fixes available for current issues.');
+      return;
+    }
+    for (const issue of safeIssues) {
+      await applyIssue(issue);
+    }
+    const remaining = await evaluateProjectDoctorIssues(workspaceRoot);
+    if (remaining.length === 0) {
+      showInfo('Project Doctor auto-fix completed. All detected issues are resolved.');
+    } else {
+      showWarning(`Project Doctor auto-fix completed. Remaining issues: ${remaining.length}.`);
+    }
+    return;
+  }
+
+  const target = issues.find(item => item.id === pick.issueId);
+  if (!target) {
+    showWarning('Selected doctor issue is no longer available.');
+    return;
+  }
+  await applyIssue(target);
+  const remaining = await evaluateProjectDoctorIssues(workspaceRoot);
+  showInfo(`Project Doctor finished. Open issues remaining: ${remaining.length}.`);
+}
+
+function mapFixToQuickActionId(fixId: string): string {
+  if (fixId === 'selectVariant') {
+    return 'select-variant';
+  }
+  if (fixId === 'selectDevice') {
+    return 'select-device';
+  }
+  if (fixId === 'setJdk21Path') {
+    return 'set-jdk21';
+  }
+  if (fixId === 'runGradleDoctor') {
+    return 'run-gradle-doctor';
+  }
+  return 'project-doctor';
+}
+
+async function getSmartRunHealthContext(context?: { moduleName?: string; deviceId?: string; variant?: string }): Promise<SmartRunHealth> {
+  const moduleName = context?.moduleName || (await getSelectedModule()) || '';
+  const deviceId = context?.deviceId || (await getSelectedDeviceId()) || '';
+  let variant = context?.variant || '';
+  if (moduleName && !variant) {
+    variant = await getSelectedVariant(moduleName);
+  }
+
+  const recommendations: SmartRunRecommendation[] = [];
+  let score = 100;
+  const health = await getLanguageHealthStatus();
+  if (!health.hasJavaExtension || !health.hasKotlinExtension) {
+    score -= 35;
+    recommendations.push({ label: 'Run Project Doctor', actionId: 'project-doctor' });
+  }
+  if (health.kotlinRiskOnJava25) {
+    score -= 20;
+    recommendations.push({ label: 'Use JDK 21', actionId: 'set-jdk21' });
+  }
+  if (!moduleName) {
+    score -= 20;
+    recommendations.push({ label: 'Select Module', actionId: 'select-module' });
+  }
+  if (!deviceId) {
+    score -= 20;
+    recommendations.push({ label: 'Select Device', actionId: 'select-device' });
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (workspaceRoot && moduleName) {
+    const preflight = await runPreflightChecks(workspaceRoot, moduleName, variant || 'Debug', deviceId, Boolean(deviceId));
+    if (!preflight.ok) {
+      score -= 35;
+      for (const fix of preflight.fixes || []) {
+        recommendations.push({ label: fix.label, actionId: mapFixToQuickActionId(fix.id) });
+      }
+    }
+    if (preflight.warnings && preflight.warnings.length > 0) {
+      score -= 10;
+    }
+  }
+
+  if (lastGradleErrorTags.includes('dependencyResolution') || lastGradleErrorTags.includes('sdkMissing')) {
+    recommendations.push({ label: 'Run Gradle Doctor', actionId: 'run-gradle-doctor' });
+  }
+  if (lastGradleErrorTags.includes('taskNotFound')) {
+    recommendations.push({ label: 'Run Clean Build', actionId: 'smart-clean-build' });
+  }
+  const lastGradleLower = (lastGradleErrorSummary || '').toLowerCase();
+  const hasDeviceConnectivityHint = /device offline|unauthorized|no devices|device not found/.test(lastGradleLower);
+  if (hasDeviceConnectivityHint && deviceId.startsWith('emulator-')) {
+    recommendations.push({ label: 'Cold Boot Emulator', actionId: 'cold-boot-selected-emulator' });
+  }
+  if (score < 75) {
+    recommendations.push({ label: 'Run Project Doctor', actionId: 'project-doctor' });
+  }
+
+  const deduped: SmartRunRecommendation[] = [];
+  const seen = new Set<string>();
+  for (const item of recommendations) {
+    const key = `${item.actionId}:${item.label}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  const normalizedScore = Math.max(5, Math.min(100, score));
+  const state: 'ok' | 'warning' | 'error' = normalizedScore >= 85
+    ? 'ok'
+    : normalizedScore >= 60
+      ? 'warning'
+      : 'error';
+  const message = state === 'ok'
+    ? 'Ready to run.'
+    : state === 'warning'
+      ? 'Run should work, but a few checks are risky.'
+      : 'Run is likely to fail until key issues are fixed.';
+  return {
+    state,
+    message,
+    score: normalizedScore,
+    recommendations: deduped.slice(0, 4),
+  };
+}
+
+function extractCrashAnrRecordsFromLogcat(
+  logcat: string,
+  context: { moduleName: string; deviceId: string; source: string }
+): CrashAnrRecord[] {
+  const out: CrashAnrRecord[] = [];
+  const lines = logcat.split('\n');
+  const appFrameRegex = /\bat\s+([a-zA-Z0-9_$.]+)\(([^:]+):(\d+)\)/;
+  const exceptionRegex = /\b([A-Za-z0-9_$.]+(?:Exception|Error))\b/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/FATAL EXCEPTION/i.test(line)) {
+      const window = lines.slice(i, i + 14).join('\n');
+      const exception = window.match(exceptionRegex)?.[1] || 'UnknownCrash';
+      const appFrame = window.match(appFrameRegex)?.[1] || 'unknown.frame';
+      const signature = `${exception}@${appFrame}`;
+      out.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'crash',
+        signature,
+        message: window.split('\n').slice(0, 5).join(' | '),
+        moduleName: context.moduleName,
+        deviceId: context.deviceId,
+        sessionId: currentSessionId || 'unknown-session',
+        source: context.source,
+        timestamp: Date.now(),
+      });
+    }
+    const anrMatch = line.match(/\bANR in\s+([A-Za-z0-9_.]+)/i);
+    if (anrMatch) {
+      const signature = `ANR:${anrMatch[1]}`;
+      out.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'anr',
+        signature,
+        message: line.trim(),
+        moduleName: context.moduleName,
+        deviceId: context.deviceId,
+        sessionId: currentSessionId || 'unknown-session',
+        source: context.source,
+        timestamp: Date.now(),
+      });
+    }
+  }
+  return out;
+}
+
+async function persistCrashAnrRecords(): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  await extensionContext.globalState.update(CRASH_ANR_RECORDS_KEY, crashAnrRecords.slice(0, 800));
+}
+
+function appendCrashAnrRecords(records: CrashAnrRecord[]): void {
+  if (!records.length) {
+    return;
+  }
+  crashAnrRecords.unshift(...records);
+  if (crashAnrRecords.length > 800) {
+    crashAnrRecords.length = 800;
+  }
+  void persistCrashAnrRecords();
+}
+
+function escapeMdCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+function commandLink(label: string, commandId: string): string {
+  return `[${label}](command:${commandId})`;
+}
+
+function getLikelyFixesForSignature(signature: string, type: 'crash' | 'anr'): CrashLikelyFix[] {
+  const lower = signature.toLowerCase();
+  const fixes: CrashLikelyFix[] = [];
+
+  if (type === 'anr' || /anr|inputdispatching timed out|main thread/.test(lower)) {
+    fixes.push({
+      label: 'Capture Performance Monitor snapshot',
+      commandId: 'android-toolkit.openPerformanceMonitor',
+    });
+    fixes.push({
+      label: 'Run Crash Repro flow',
+      commandId: 'android-toolkit.openRunPanel',
+    });
+  }
+  if (/outofmemoryerror|oom/.test(lower)) {
+    fixes.push({
+      label: 'Inspect memory pressure in Profiler',
+      commandId: 'android-toolkit.openProfiler',
+    });
+  }
+  if (/unknownhost|sockettimeout|connectexception|network|sslhandshake/.test(lower)) {
+    fixes.push({
+      label: 'Verify emulator/device network state',
+      commandId: 'android-toolkit.emulator.toggleNetwork',
+    });
+    fixes.push({
+      label: 'Android network troubleshooting',
+      docUrl: 'https://developer.android.com/training/monitoring-device-state/connectivity-status-type',
+    });
+  }
+  if (/sqlite|room|cursorwindow|disk i\/o/.test(lower)) {
+    fixes.push({
+      label: 'Inspect runtime DB state',
+      commandId: 'android-toolkit.openDatabaseInspector',
+    });
+  }
+  if (/classnotfound|nosuchmethod|verifyerror|incompatibleclasschange/.test(lower)) {
+    fixes.push({
+      label: 'Run Gradle Sync',
+      commandId: 'android-toolkit.gradleSync',
+    });
+    fixes.push({
+      label: 'Run Project Doctor',
+      commandId: 'android-toolkit.projectDoctor',
+    });
+  }
+  if (/native|sigsegv|abort|lib\w+\.so/.test(lower)) {
+    fixes.push({
+      label: 'Open Crash Symbolicator',
+      commandId: 'android-toolkit.openCrashSymbolicator',
+    });
+  }
+  fixes.push({
+    label: 'Open Crash & ANR triage again',
+    commandId: 'android-toolkit.openCrashAnrTriage',
+  });
+
+  const deduped: CrashLikelyFix[] = [];
+  const seen = new Set<string>();
+  for (const fix of fixes) {
+    const key = `${fix.label}:${fix.commandId || ''}:${fix.docUrl || ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(fix);
+  }
+  return deduped.slice(0, 4);
+}
+
+async function openCrashAnrTriageReport(): Promise<void> {
+  ensureDiagnosticsDataLoaded();
+  const records = crashAnrRecords.slice(0, 800);
+  if (records.length === 0) {
+    showInfo('No crash/ANR records captured yet. Run crash repro or export artifacts first.');
+    return;
+  }
+  const grouped = new Map<string, CrashAnrRecord[]>();
+  for (const row of records) {
+    const current = grouped.get(row.signature) || [];
+    current.push(row);
+    grouped.set(row.signature, current);
+  }
+
+  const recentSessions = sessionHistory
+    .slice()
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .slice(0, 10)
+    .map(s => s.id);
+  const recentSet = new Set(recentSessions.slice(0, 5));
+  const baselineSet = new Set(recentSessions.slice(5, 10));
+
+  const rows = Array.from(grouped.entries()).map(([signature, list]) => {
+    const recentHits = list.filter(item => recentSet.has(item.sessionId)).length;
+    const baselineHits = list.filter(item => baselineSet.has(item.sessionId)).length;
+    return {
+      signature,
+      type: list[0].type,
+      total: list.length,
+      recentHits,
+      baselineHits,
+      delta: recentHits - baselineHits,
+      latestAt: Math.max(...list.map(item => item.timestamp)),
+    };
+  });
+
+  const topRegressions = rows
+    .filter(item => item.delta > 0)
+    .sort((a, b) => b.delta - a.delta || b.total - a.total)
+    .slice(0, 10);
+  const topSignatures = rows
+    .slice()
+    .sort((a, b) => b.total - a.total || b.latestAt - a.latestAt)
+    .slice(0, 15);
+
+  const lines: string[] = [];
+  lines.push('# Crash and ANR Triage');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Events: ${records.length}`);
+  lines.push(`Unique signatures: ${rows.length}`);
+  lines.push('');
+  lines.push('## Top regressions (last 5 sessions vs previous 5)');
+  lines.push('');
+  if (topRegressions.length === 0) {
+    lines.push('No regressions detected in the latest sessions.');
+  } else {
+    lines.push('| Type | Signature | Recent | Previous | Delta |');
+    lines.push('| --- | --- | ---: | ---: | ---: |');
+    for (const row of topRegressions) {
+      lines.push(`| ${row.type.toUpperCase()} | ${row.signature} | ${row.recentHits} | ${row.baselineHits} | +${row.delta} |`);
+    }
+  }
+  lines.push('');
+  lines.push('## Top signatures');
+  lines.push('');
+  lines.push('| Type | Signature | Count | Last Seen | Likely fixes |');
+  lines.push('| --- | --- | ---: | --- | --- |');
+  for (const row of topSignatures) {
+    const fixes = getLikelyFixesForSignature(row.signature, row.type)
+      .map(item => item.commandId
+        ? commandLink(item.label, item.commandId)
+        : `[${item.label}](${item.docUrl})`
+      )
+      .join('<br/>');
+    lines.push(`| ${row.type.toUpperCase()} | ${escapeMdCell(row.signature)} | ${row.total} | ${new Date(row.latestAt).toISOString()} | ${fixes || 'n/a'} |`);
+  }
+  lines.push('');
+  lines.push('## Signature fix playbooks');
+  lines.push('');
+  for (const row of topSignatures.slice(0, 10)) {
+    lines.push(`### ${row.type.toUpperCase()} ${row.signature}`);
+    const fixes = getLikelyFixesForSignature(row.signature, row.type);
+    for (const fix of fixes) {
+      if (fix.commandId) {
+        lines.push(`- ${commandLink(fix.label, fix.commandId)}`);
+      } else if (fix.docUrl) {
+        lines.push(`- [${fix.label}](${fix.docUrl})`);
+      }
+    }
+    lines.push('');
+  }
+
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: lines.join('\n'),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+function parseDurationToMs(input: string): number {
+  const text = input.trim().toLowerCase();
+  let total = 0;
+  const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*m/);
+  if (minuteMatch) {
+    total += Math.round(parseFloat(minuteMatch[1]) * 60_000);
+  }
+  const secondMatch = text.match(/(\d+(?:\.\d+)?)\s*s/);
+  if (secondMatch) {
+    total += Math.round(parseFloat(secondMatch[1]) * 1000);
+  }
+  const msMatch = text.match(/(\d+(?:\.\d+)?)\s*ms/);
+  if (msMatch) {
+    total += Math.round(parseFloat(msMatch[1]));
+  }
+  return total;
+}
+
+function toTopNamedCounts(map: Map<string, number>, limit: number): NamedCountHotspot[] {
+  return Array.from(map.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, limit);
+}
+
+function analyzeGradleBottlenecks(task: string, exitCode: number, stdout: string, stderr: string): GradleBottleneckRecord {
+  const combined = [stdout || '', stderr || ''].filter(Boolean).join('\n');
+  const lines = combined.split('\n');
+  const taskDurations = new Map<string, number>();
+  const pluginCounts = new Map<string, number>();
+  const depCounts = new Map<string, number>();
+  let totalDurationMs = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    const taskMatch = line.match(/(?:>\s*Task\s+)?(:[A-Za-z0-9_:.\-]+).*?\b(\d+(?:\.\d+)?(?:ms|s|m))\b/);
+    if (taskMatch) {
+      const durationMs = parseDurationToMs(taskMatch[2]);
+      if (durationMs > 0) {
+        const prev = taskDurations.get(taskMatch[1]) || 0;
+        taskDurations.set(taskMatch[1], Math.max(prev, durationMs));
+      }
+    }
+
+    const pluginMatch = line.match(/(?:plugin\s+|id\s*[=:]\s*|Applying plugin\s+)([A-Za-z0-9_.\-]+)/i);
+    if (pluginMatch) {
+      const name = pluginMatch[1];
+      pluginCounts.set(name, (pluginCounts.get(name) || 0) + 1);
+    }
+
+    const depMatch = line.match(/Could not resolve\s+([A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+(?::[A-Za-z0-9+_.\-]+)?)/i)
+      || line.match(/[+\\]---\s+([A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+:[A-Za-z0-9+_.\-]+)/);
+    if (depMatch) {
+      depCounts.set(depMatch[1], (depCounts.get(depMatch[1]) || 0) + 1);
+    }
+
+    if (totalDurationMs <= 0) {
+      const totalMatch = line.match(/BUILD\s+(?:SUCCESSFUL|FAILED)\s+in\s+(.+)$/i);
+      if (totalMatch) {
+        totalDurationMs = parseDurationToMs(totalMatch[1]);
+      }
+    }
+  }
+
+  const slowTasks = Array.from(taskDurations.entries())
+    .map(([taskName, durationMs]) => ({ task: taskName, durationMs }))
+    .sort((a, b) => b.durationMs - a.durationMs || a.task.localeCompare(b.task))
+    .slice(0, 12);
+  if (totalDurationMs <= 0) {
+    totalDurationMs = slowTasks.reduce((sum, item) => sum + item.durationMs, 0);
+  }
+
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    task,
+    success: exitCode === 0,
+    timestamp: Date.now(),
+    totalDurationMs,
+    slowTasks,
+    pluginHotspots: toTopNamedCounts(pluginCounts, 10),
+    dependencyHotspots: toTopNamedCounts(depCounts, 10),
+  };
+}
+
+async function appendGradleBottleneckRecord(record: GradleBottleneckRecord): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  const existing = extensionContext.globalState.get<GradleBottleneckRecord[]>(GRADLE_BOTTLENECK_HISTORY_KEY, []);
+  existing.unshift(record);
+  if (existing.length > 60) {
+    existing.length = 60;
+  }
+  await extensionContext.globalState.update(GRADLE_BOTTLENECK_HISTORY_KEY, existing);
+}
+
+async function captureGradleBottlenecks(task: string, exitCode: number, stdout: string, stderr: string): Promise<void> {
+  const analyzed = analyzeGradleBottlenecks(task, exitCode, stdout, stderr);
+  await appendGradleBottleneckRecord(analyzed);
+}
+
+function formatDurationMs(ms: number): string {
+  if (ms >= 60_000) {
+    const minutes = Math.floor(ms / 60_000);
+    const seconds = Math.round((ms % 60_000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  return `${ms}ms`;
+}
+
+async function openGradleBottleneckAnalyzer(): Promise<void> {
+  if (!extensionContext) {
+    showError('Extension context not available.');
+    return;
+  }
+  const last = getLastGradleOutputSnapshot();
+  if (last) {
+    await captureGradleBottlenecks(last.task, last.exitCode, last.stdout, last.stderr);
+  }
+
+  const history = extensionContext.globalState
+    .get<GradleBottleneckRecord[]>(GRADLE_BOTTLENECK_HISTORY_KEY, [])
+    .slice()
+    .sort((a, b) => b.timestamp - a.timestamp);
+
+  if (history.length === 0) {
+    showInfo('No Gradle outputs captured yet. Run a build and reopen the analyzer.');
+    return;
+  }
+
+  const latest = history[0];
+  const trend = history.slice(0, 10);
+  const lines: string[] = [];
+  lines.push('# Gradle Bottleneck Analyzer');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Build samples available: ${history.length}`);
+  lines.push(`Latest task: ${latest.task}`);
+  lines.push(`Latest duration: ${formatDurationMs(latest.totalDurationMs)}`);
+  lines.push('');
+  lines.push('## Slow tasks (latest build)');
+  lines.push('');
+  if (latest.slowTasks.length === 0) {
+    lines.push('No per-task duration lines detected in latest output.');
+  } else {
+    lines.push('| Task | Duration |');
+    lines.push('| --- | ---: |');
+    for (const row of latest.slowTasks.slice(0, 12)) {
+      lines.push(`| ${escapeMdCell(row.task)} | ${formatDurationMs(row.durationMs)} |`);
+    }
+  }
+  lines.push('');
+  lines.push('## Plugin hotspots (latest build)');
+  lines.push('');
+  if (latest.pluginHotspots.length === 0) {
+    lines.push('No plugin hotspot markers found in latest output.');
+  } else {
+    lines.push('| Plugin | Hits |');
+    lines.push('| --- | ---: |');
+    for (const row of latest.pluginHotspots) {
+      lines.push(`| ${escapeMdCell(row.name)} | ${row.count} |`);
+    }
+  }
+  lines.push('');
+  lines.push('## Dependency hotspots (latest build)');
+  lines.push('');
+  if (latest.dependencyHotspots.length === 0) {
+    lines.push('No dependency hotspots found in latest output.');
+  } else {
+    lines.push('| Dependency | Hits |');
+    lines.push('| --- | ---: |');
+    for (const row of latest.dependencyHotspots) {
+      lines.push(`| ${escapeMdCell(row.name)} | ${row.count} |`);
+    }
+  }
+  lines.push('');
+  lines.push('## Build trend (last 10 builds)');
+  lines.push('');
+  lines.push('| Time | Task | Duration | Result | Top slow task |');
+  lines.push('| --- | --- | ---: | --- | --- |');
+  for (const row of trend) {
+    const topSlow = row.slowTasks[0] ? `${row.slowTasks[0].task} (${formatDurationMs(row.slowTasks[0].durationMs)})` : 'n/a';
+    lines.push(`| ${new Date(row.timestamp).toISOString()} | ${escapeMdCell(row.task)} | ${formatDurationMs(row.totalDurationMs)} | ${row.success ? 'PASS' : 'FAIL'} | ${escapeMdCell(topSlow)} |`);
+  }
+
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'markdown',
+    content: lines.join('\n'),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function listDeviceStateProfiles(): Promise<DeviceStateProfile[]> {
+  if (!extensionContext) {
+    return [];
+  }
+  return extensionContext.globalState
+    .get<DeviceStateProfile[]>(DEVICE_STATE_PROFILES_KEY, [])
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+async function persistDeviceStateProfiles(profiles: DeviceStateProfile[]): Promise<void> {
+  if (!extensionContext) {
+    return;
+  }
+  const next = profiles.slice(0, 40);
+  await extensionContext.globalState.update(DEVICE_STATE_PROFILES_KEY, next);
+}
+
+async function readShellValue(deviceId: string, ...shellArgs: string[]): Promise<string> {
+  const sdk = detectSdk();
+  const result = await execCommand(sdk.adb, ['-s', deviceId, 'shell', ...shellArgs], { timeout: 30_000 });
+  if (result.exitCode !== 0) {
+    return '';
+  }
+  return result.stdout.trim();
+}
+
+async function writeShell(deviceId: string, ...shellArgs: string[]): Promise<boolean> {
+  const sdk = detectSdk();
+  const result = await execCommand(sdk.adb, ['-s', deviceId, 'shell', ...shellArgs], { timeout: 30_000 });
+  return result.exitCode === 0;
+}
+
+async function readGrantedPermissions(deviceId: string, packageName: string): Promise<string[]> {
+  const sdk = detectSdk();
+  const result = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'dumpsys', 'package', packageName], { timeout: 60_000 });
+  if (result.exitCode !== 0) {
+    return [];
+  }
+  const out: string[] = [];
+  const regex = /\s([A-Za-z0-9_.]+):\sgranted=true/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(result.stdout)) !== null) {
+    out.push(match[1]);
+  }
+  return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
+}
+
+async function buildDeviceStateProfile(deviceId: string, name: string, moduleName?: string): Promise<DeviceStateProfile> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const resolvedModule = moduleName || (workspaceRoot ? await getSelectedModule() : '') || undefined;
+  const packageName = workspaceRoot && resolvedModule
+    ? findApplicationId(workspaceRoot, resolvedModule)
+    : undefined;
+  const battery = await AdbService.getBatteryInfo(deviceId);
+  const locale =
+    (await readShellValue(deviceId, 'getprop', 'persist.sys.locale'))
+    || (await readShellValue(deviceId, 'getprop', 'ro.product.locale'))
+    || 'unknown';
+
+  const profile: DeviceStateProfile = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    deviceId,
+    moduleName: resolvedModule,
+    packageName: packageName || undefined,
+    network: await getNetworkStatus(deviceId),
+    batteryLevel: battery.level,
+    batteryStatus: battery.status,
+    locale,
+    animations: {
+      window: (await readShellValue(deviceId, 'settings', 'get', 'global', 'window_animation_scale')) || '1',
+      transition: (await readShellValue(deviceId, 'settings', 'get', 'global', 'transition_animation_scale')) || '1',
+      animator: (await readShellValue(deviceId, 'settings', 'get', 'global', 'animator_duration_scale')) || '1',
+    },
+    grantedPermissions: packageName ? await readGrantedPermissions(deviceId, packageName) : [],
+  };
+  return profile;
+}
+
+async function saveDeviceStateProfileCommand(): Promise<void> {
+  const devices = (await listDevicesDetailed()).filter(d => d.status === 'online');
+  if (devices.length === 0) {
+    showWarning('No online devices found.');
+    return;
+  }
+  const selected = devices.length === 1
+    ? devices[0]
+    : await pickDevice(devices, { title: 'Select device for state snapshot' });
+  if (!selected) {
+    return;
+  }
+  const defaultName = `profile-${selected.id}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`;
+  const name = await vscode.window.showInputBox({
+    prompt: 'Device state profile name',
+    value: defaultName,
+  });
+  if (!name?.trim()) {
+    return;
+  }
+
+  const profile = await buildDeviceStateProfile(selected.id, name.trim());
+  const existing = await listDeviceStateProfiles();
+  const idx = existing.findIndex(item => item.name === profile.name);
+  if (idx >= 0) {
+    profile.id = existing[idx].id;
+    profile.createdAt = existing[idx].createdAt;
+    existing[idx] = profile;
+  } else {
+    existing.unshift(profile);
+  }
+  await persistDeviceStateProfiles(existing);
+  showInfo(`Saved device state profile: ${profile.name}`);
+}
+
+async function applyDeviceStateProfileByName(
+  profileName: string,
+  deviceId: string,
+  moduleName?: string,
+  explicitPackageName?: string
+): Promise<RunActionResult> {
+  const profiles = await listDeviceStateProfiles();
+  const profile = profiles.find(item => item.name === profileName);
+  if (!profile) {
+    return { success: false, message: `Device state profile not found: ${profileName}` };
+  }
+  return applyDeviceStateProfile(profile, deviceId, moduleName, explicitPackageName);
+}
+
+async function applyDeviceStateProfile(
+  profile: DeviceStateProfile,
+  deviceId: string,
+  moduleName?: string,
+  explicitPackageName?: string
+): Promise<RunActionResult> {
+  const warnings: string[] = [];
+
+  if (profile.network === 'enabled') {
+    const net = await enableNetwork(deviceId);
+    if (!net.success) {
+      warnings.push(`Network enable failed: ${net.message}`);
+    }
+  } else if (profile.network === 'disabled') {
+    const net = await disableNetwork(deviceId);
+    if (!net.success) {
+      warnings.push(`Network disable failed: ${net.message}`);
+    }
+  }
+
+  const batteryLevel = await AdbService.setBatteryLevel(deviceId, profile.batteryLevel);
+  if (!batteryLevel.success) {
+    warnings.push(batteryLevel.message);
+  }
+  const batteryStatus = await AdbService.setBatteryStatus(deviceId, profile.batteryStatus === 'unknown' ? 'charging' : profile.batteryStatus);
+  if (!batteryStatus.success) {
+    warnings.push(batteryStatus.message);
+  }
+
+  if (profile.locale && profile.locale !== 'unknown') {
+    const localeOk = await writeShell(deviceId, 'setprop', 'persist.sys.locale', profile.locale);
+    if (!localeOk) {
+      warnings.push('Locale update failed (requires elevated permissions on some devices).');
+    }
+  }
+
+  const animWindowOk = await writeShell(deviceId, 'settings', 'put', 'global', 'window_animation_scale', profile.animations.window || '1');
+  const animTransOk = await writeShell(deviceId, 'settings', 'put', 'global', 'transition_animation_scale', profile.animations.transition || '1');
+  const animAnimatorOk = await writeShell(deviceId, 'settings', 'put', 'global', 'animator_duration_scale', profile.animations.animator || '1');
+  if (!animWindowOk || !animTransOk || !animAnimatorOk) {
+    warnings.push('Animation scale update failed for one or more settings.');
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const resolvedModule = moduleName || profile.moduleName;
+  const packageName = explicitPackageName
+    || profile.packageName
+    || (workspaceRoot && resolvedModule ? findApplicationId(workspaceRoot, resolvedModule) : undefined)
+    || undefined;
+  if (packageName && profile.grantedPermissions.length > 0) {
+    const sdk = detectSdk();
+    for (const permission of profile.grantedPermissions) {
+      const grantResult = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'pm', 'grant', packageName, permission], { timeout: 20_000 });
+      if (grantResult.exitCode !== 0) {
+        warnings.push(`Permission grant failed (${permission})`);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    message: warnings.length > 0
+      ? `Profile applied with warnings: ${warnings.join(' | ')}`
+      : `Profile applied: ${profile.name}`,
+  };
+}
+
+async function applyDeviceStateProfileCommand(): Promise<void> {
+  const profiles = await listDeviceStateProfiles();
+  if (profiles.length === 0) {
+    showWarning('No device state profiles found. Save one first.');
+    return;
+  }
+  const pickedProfile = await vscode.window.showQuickPick(
+    profiles.map(item => ({
+      label: item.name,
+      description: `${item.deviceId} · ${new Date(item.updatedAt).toLocaleString()}`,
+      profileId: item.id,
+    })),
+    { placeHolder: 'Select device state profile to apply' }
+  );
+  if (!pickedProfile) {
+    return;
+  }
+  const profile = profiles.find(item => item.id === pickedProfile.profileId);
+  if (!profile) {
+    return;
+  }
+
+  const devices = (await listDevicesDetailed()).filter(d => d.status === 'online');
+  if (devices.length === 0) {
+    showWarning('No online devices found.');
+    return;
+  }
+  const selected = devices.length === 1
+    ? devices[0]
+    : await pickDevice(devices, { title: 'Select target device for profile replay' });
+  if (!selected) {
+    return;
+  }
+
+  const result = await applyDeviceStateProfile(profile, selected.id);
+  result.success ? showInfo(result.message) : showError(result.message);
+}
+
+async function runTestsWithDeviceStateProfileCommand(): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    showError('No workspace folder open.');
+    return;
+  }
+  const moduleName = await selectModule(workspaceRoot);
+  if (!moduleName) {
+    return;
+  }
+  const profiles = await listDeviceStateProfiles();
+  if (profiles.length === 0) {
+    showWarning('No device state profiles found. Save one first.');
+    return;
+  }
+  const pickedProfile = await vscode.window.showQuickPick(
+    profiles.map(item => ({ label: item.name, description: `${item.deviceId} · ${new Date(item.updatedAt).toLocaleString()}` })),
+    { placeHolder: 'Select state profile for test replay' }
+  );
+  if (!pickedProfile) {
+    return;
+  }
+  const profile = profiles.find(item => item.name === pickedProfile.label);
+  if (!profile) {
+    return;
+  }
+
+  const devices = (await listDevicesDetailed()).filter(d => d.status === 'online');
+  if (devices.length === 0) {
+    showWarning('No online devices found.');
+    return;
+  }
+  const pickedDevices = await vscode.window.showQuickPick(
+    devices.map(d => ({ label: d.id, description: d.type })),
+    {
+      placeHolder: 'Select devices to run instrumentation tests on',
+      canPickMany: true,
+    }
+  );
+  if (!pickedDevices || pickedDevices.length === 0) {
+    return;
+  }
+  const runner = await vscode.window.showInputBox({
+    prompt: 'Instrumentation runner',
+    placeHolder: 'com.example.test/androidx.test.runner.AndroidJUnitRunner',
+  });
+  if (!runner?.trim()) {
+    showWarning('Instrumentation runner is required.');
+    return;
+  }
+
+  const channel = vscode.window.createOutputChannel('Android Test Replay');
+  channel.clear();
+  channel.show(true);
+  channel.appendLine(`Test replay profile: ${profile.name}`);
+  channel.appendLine(`Module: ${moduleName}`);
+  channel.appendLine('');
+
+  for (const device of pickedDevices) {
+    channel.appendLine(`== ${device.label} ==`);
+    const applied = await applyDeviceStateProfile(profile, device.label, moduleName);
+    channel.appendLine(applied.message);
+    const test = await AdbService.runInstrumentation(device.label, runner.trim());
+    channel.appendLine(test.success ? '[PASS] Instrumentation finished' : '[FAIL] Instrumentation failed');
+    channel.appendLine((test.data || test.message || '').split('\n').slice(-25).join('\n'));
+    channel.appendLine('');
+  }
+}
 function extractBuildToolsVersionFromGradleError(output: string): string | undefined {
   const lines = output.split('\n');
   const idx = lines.findIndex(line => line.includes('What went wrong'));
@@ -2420,6 +4625,7 @@ async function installVariant(
       if (hasInstallTask) {
         const installResult = await runGradleInstallWithRecovery(workspaceRoot, installTask, gradleArgs, env, deviceId);
         showGradleOutput(installTask, installResult, workspaceRoot);
+        await captureGradleBottlenecks(installTask, installResult.exitCode, installResult.stdout || '', installResult.stderr || '');
         if (installResult.exitCode === 0) {
           lastGradleErrorSummary = undefined;
           lastGradleErrorLocation = undefined;
@@ -2435,6 +4641,7 @@ async function installVariant(
         const task = `:${moduleName}:assemble${variant}`;
         const buildResult = await runGradleTaskWithResult(workspaceRoot, task, gradleArgs, env);
         showGradleOutput(task, buildResult, workspaceRoot);
+        await captureGradleBottlenecks(task, buildResult.exitCode, buildResult.stdout || '', buildResult.stderr || '');
         if (buildResult.exitCode !== 0) {
           const gradleMessage = (buildResult.stderr || buildResult.stdout || '').trim();
           if (!ensureBuildToolsInstalled(workspaceRoot, moduleName, gradleMessage)) {
@@ -2553,6 +4760,18 @@ async function runCrashReproFlow(workspaceRoot: string, moduleName: string, devi
   if (!startRes.success) {
     return { success: false, message: startRes.message };
   }
+  try {
+    const logcat = await collectLogcatSnapshot(deviceId, packageName);
+    appendCrashAnrRecords(
+      extractCrashAnrRecordsFromLogcat(logcat, {
+        moduleName,
+        deviceId,
+        source: 'crash-repro',
+      })
+    );
+  } catch {
+    // best effort
+  }
   await openLogcatAndFilterForApp(deviceId);
   return { success: true, message: 'Crash repro flow completed: clear data, stop, launch, and logcat app filter started.' };
 }
@@ -2632,6 +4851,13 @@ async function exportRunArtifactsBundle(
       progress.report({ increment: 20, message: 'Collecting logcat snapshot…' });
       const logcat = await collectLogcatSnapshot(deviceId, packageName);
       zip.file('logcat-selected.txt', logcat || 'No logcat data captured.');
+      appendCrashAnrRecords(
+        extractCrashAnrRecordsFromLogcat(logcat, {
+          moduleName,
+          deviceId,
+          source: 'artifacts-export',
+        })
+      );
       progress.report({ increment: 20, message: 'Collecting device info…' });
       try {
         const deviceProps = await AdbService.getDeviceProperties(deviceId);
@@ -3582,6 +5808,7 @@ async function validateManifestCommand(): Promise<void> {
     showError('No workspace folder open.');
     return;
   }
+  const { validateManifest } = lazyLoad<typeof import('./projectView/manifestTools')>('./projectView/manifestTools');
   const issues = validateManifest(workspaceRoot);
   if (issues.length === 0) {
     showInfo('Manifest looks good.');
@@ -3711,12 +5938,14 @@ async function openRunFailureReport(): Promise<void> {
   await vscode.window.showTextDocument(doc, { preview: false });
 }
 function openFailureInsightsPanel(): void {
+  const { FailureInsightsPanel, summarizeFailureInsights } = lazyLoad<typeof import('./insights/failureInsightsPanel')>('./insights/failureInsightsPanel');
   const summary = summarizeFailureInsights(runFailureRecords, runFixAttempts);
   FailureInsightsPanel.createOrShow(summary);
 }
 function openSloDashboardPanel(): void {
+  const { SloDashboardPanel } = lazyLoad<typeof import('./insights/sloDashboardPanel')>('./insights/sloDashboardPanel');
   const summary = summarizeSlo(runActionMetrics, sessionHistory, summarizeCommandBudgets(commandLatencyMetrics));
-  SloDashboardPanel.createOrShow(summary, summarizeSlowPaths(slowPathMetrics, 8));
+  SloDashboardPanel.createOrShow(summary, summarizeSlowPaths(slowPathMetrics, TOP_SLOW_PATH_LIMIT));
 }
 function openErrorKnowledgeBasePanel(): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -3731,8 +5960,11 @@ async function runCiSmoke(context: vscode.ExtensionContext): Promise<void> {
   const output = vscode.window.createOutputChannel('Android Tools CI Smoke');
   output.clear();
   output.appendLine('Starting CI smoke checks...');
+  const firstCommandStartedAt = Date.now();
   await vscode.commands.executeCommand('android-toolkit.openRunPanel');
+  const firstCommandLatencyMs = Date.now() - firstCommandStartedAt;
   output.appendLine('[OK] Run panel opened');
+  output.appendLine(`[PERF] activationTotalMs=${startupProfilerTotalMs} firstCommandLatencyMs=${firstCommandLatencyMs}`);
 
   try {
     const online = (await listDevicesDetailed()).filter(d => d.status === 'online');
@@ -3764,6 +5996,21 @@ async function runCiSmoke(context: vscode.ExtensionContext): Promise<void> {
       : '[OK] Team config imported');
   } else {
     output.appendLine('[INFO] No workspace folder open; skipping matrix/team checks');
+  }
+
+  try {
+    const snapshot = {
+      generatedAt: new Date().toISOString(),
+      platform: process.platform,
+      activationTotalMs: startupProfilerTotalMs,
+      firstCommandLatencyMs,
+    };
+    const snapshotPath = path.join(context.extensionPath, CI_PERF_SNAPSHOT_RELATIVE_PATH);
+    fs.mkdirSync(path.dirname(snapshotPath), { recursive: true });
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2), 'utf8');
+    output.appendLine(`[OK] CI perf snapshot written: ${snapshotPath}`);
+  } catch (error) {
+    output.appendLine(`[WARN] Failed to persist CI perf snapshot: ${error instanceof Error ? error.message : String(error)}`);
   }
   output.appendLine('CI smoke completed.');
   output.show(true);
@@ -4015,41 +6262,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const persistedStartupEntries = context.globalState.get<StartupProfilerEntry[]>(STARTUP_PROFILER_ENTRIES_KEY, []);
   startupProfilerEntries.splice(0, startupProfilerEntries.length, ...persistedStartupEntries);
   startupProfilerTotalMs = context.globalState.get<number>(STARTUP_PROFILER_TOTAL_KEY, 0);
-  const persistedActionReplay = context.globalState.get<ActionReplayRecord[]>(ACTION_REPLAY_KEY, []);
-  if (persistedActionReplay.length > 0) {
-    actionReplay.splice(0, actionReplay.length, ...persistedActionReplay.slice(0, 300));
-  }
-  const persistedMetrics = context.globalState.get<RunActionMetric[]>(RUN_ACTION_METRICS_KEY, []);
-  if (persistedMetrics.length > 0) {
-    runActionMetrics.splice(0, runActionMetrics.length, ...persistedMetrics.slice(0, 1000));
-  }
-  const persistedCommandMetrics = context.globalState.get<CommandLatencyRecord[]>(COMMAND_LATENCY_METRICS_KEY, []);
-  if (persistedCommandMetrics.length > 0) {
-    commandLatencyMetrics.splice(0, commandLatencyMetrics.length, ...persistedCommandMetrics.slice(0, 1000));
-  }
-  const persistedSlowPaths = context.globalState.get<SlowPathRecord[]>(SLOW_PATH_METRICS_KEY, []);
-  if (persistedSlowPaths.length > 0) {
-    slowPathMetrics.splice(0, slowPathMetrics.length, ...persistedSlowPaths.slice(0, 2000));
-  }
   const persistedSessions = context.globalState.get<SessionRecord[]>(SESSION_HISTORY_KEY, []);
   if (persistedSessions.length > 0) {
     sessionHistory.splice(0, sessionHistory.length, ...persistedSessions.slice(0, 300));
-  }
-  const persistedFailures = context.globalState.get<RunFailureRecord[]>(RUN_FAILURE_RECORDS_KEY, []);
-  if (persistedFailures.length > 0) {
-    runFailureRecords.splice(
-      0,
-      runFailureRecords.length,
-      ...persistedFailures.slice(0, 500).map(item => ({ ...item, reason: normalizeErrorReason(item.reason) }))
-    );
-  }
-  const persistedFixAttempts = context.globalState.get<RunFixAttemptRecord[]>(RUN_FIX_ATTEMPTS_KEY, []);
-  if (persistedFixAttempts.length > 0) {
-    runFixAttempts.splice(
-      0,
-      runFixAttempts.length,
-      ...persistedFixAttempts.slice(0, 500).map(item => ({ ...item, reason: normalizeErrorReason(item.reason) }))
-    );
   }
   const tStatusBar = Date.now();
   createStatusBar(context);
@@ -4102,7 +6317,7 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.registerTreeDataProvider('androidProblemsView', problemsProvider)
     );
   };
-  setTimeout(() => ensureAuxiliaryViewsInitialized(), 0);
+  setTimeout(() => ensureAuxiliaryViewsInitialized(), 1500);
   recordStartupPhase('views:register', tViews, activationStartedAt);
   logPerf('activate:registerViews', Date.now() - activationStartedAt);
   const autoSyncEnabled = vscode.workspace.getConfiguration('androidToolkit').get<boolean>('sync.autoSync.enabled', true);
@@ -4110,6 +6325,23 @@ export function activate(context: vscode.ExtensionContext): void {
   let lastDeviceFingerprint = '';
   let autoSyncInFlight = false;
   let autoSyncQueued = false;
+  let autoSyncRefreshTimer: NodeJS.Timeout | undefined;
+  const scheduleAutoSyncRefresh = (): void => {
+    if (autoSyncRefreshTimer) {
+      return;
+    }
+    autoSyncRefreshTimer = setTimeout(() => {
+      autoSyncRefreshTimer = undefined;
+      const refreshStartedAt = Date.now();
+      invalidateFastCaches();
+      projectProvider.refresh();
+      controlProvider?.refresh();
+      deviceManagerProvider?.refresh();
+      deviceFileExplorerProvider?.refresh();
+      refreshStatusBar();
+      trackSlowPathMetric('autoSyncRefreshFanout', Date.now() - refreshStartedAt, true);
+    }, 180);
+  };
   const buildDeviceFingerprint = (items: Array<{ id: string; status: string; type: string }>): string =>
     items
       .map(d => `${d.id}:${d.status}:${d.type}`)
@@ -4129,12 +6361,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       lastDeviceFingerprint = next;
-      invalidateFastCaches(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
-      projectProvider.refresh();
-      controlProvider?.refresh();
-      deviceManagerProvider?.refresh();
-      deviceFileExplorerProvider?.refresh();
-      refreshStatusBar();
+      scheduleAutoSyncRefresh();
     } catch {
     } finally {
       autoSyncInFlight = false;
@@ -4156,7 +6383,13 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     );
     backgroundScheduler.start('autoSync');
-    context.subscriptions.push(new vscode.Disposable(() => backgroundScheduler.stop('autoSync')));
+    context.subscriptions.push(new vscode.Disposable(() => {
+      backgroundScheduler.stop('autoSync');
+      if (autoSyncRefreshTimer) {
+        clearTimeout(autoSyncRefreshTimer);
+        autoSyncRefreshTimer = undefined;
+      }
+    }));
   }
   backgroundScheduler.register(
     'statusBarRefresh',
@@ -4170,6 +6403,37 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   backgroundScheduler.start('statusBarRefresh');
   context.subscriptions.push(new vscode.Disposable(() => backgroundScheduler.stop('statusBarRefresh')));
+  let idleWarmupCompleted = false;
+  backgroundScheduler.register(
+    'idleWarmup',
+    12_000,
+    async () => {
+      if (idleWarmupCompleted) {
+        return;
+      }
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        idleWarmupCompleted = true;
+        backgroundScheduler.stop('idleWarmup');
+        return;
+      }
+      await withSlowPathTrace('projectModuleScan', async () => {
+        findApplicationModulesCached(workspaceRoot, 20_000);
+      });
+      await listGradleTasks(workspaceRoot);
+      await listOnlineDevicesCached(2500);
+      idleWarmupCompleted = true;
+      backgroundScheduler.stop('idleWarmup');
+    },
+    {
+      shouldRun: () => {
+        const lastCommandTs = commandLatencyMetrics[0]?.timestamp || 0;
+        return vscode.window.state.focused && Date.now() - lastCommandTs > 8_000;
+      },
+    }
+  );
+  setTimeout(() => backgroundScheduler.start('idleWarmup'), 10_000);
+  context.subscriptions.push(new vscode.Disposable(() => backgroundScheduler.stop('idleWarmup')));
   const tLanguage = Date.now();
   let xmlLivePreviewController: XmlLivePreviewController | undefined;
   let xmlLintController: AndroidLayoutLintController | undefined;
@@ -4210,12 +6474,45 @@ export function activate(context: vscode.ExtensionContext): void {
     );
     recordStartupPhase('languages:register', tLanguage, activationStartedAt);
   };
+  const isLanguageProviderTarget = (doc: vscode.TextDocument | undefined): boolean => {
+    if (!doc) {
+      return false;
+    }
+    if (doc.uri.scheme !== 'file') {
+      return false;
+    }
+    if (doc.languageId === 'xml' || doc.languageId === 'gradle') {
+      return true;
+    }
+    return /\.gradle\.kts$/i.test(doc.uri.fsPath);
+  };
+  const maybeRegisterLanguageProviders = (doc: vscode.TextDocument | undefined): void => {
+    if (!doc) {
+      return;
+    }
+    if (!isLanguageProviderTarget(doc)) {
+      return;
+    }
+    registerLanguageProviders();
+  };
   const ensureLanguageControllers = (): void => {
     if (!xmlLivePreviewController || !xmlLintController) {
       registerLanguageProviders();
     }
   };
-  setTimeout(registerLanguageProviders, 0);
+  maybeRegisterLanguageProviders(vscode.window.activeTextEditor?.document);
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((doc: any) => {
+      maybeRegisterLanguageProviders(doc);
+    })
+  );
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor: any) => {
+      maybeRegisterLanguageProviders(editor?.document);
+    })
+  );
+  // Fallback: register after startup if no relevant editor events have fired.
+  setTimeout(registerLanguageProviders, 3500);
   const workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     invalidateFastCaches();
     projectProvider.refresh();
@@ -4230,7 +6527,7 @@ export function activate(context: vscode.ExtensionContext): void {
     projectProvider.setViewMode(next);
   });
   context.subscriptions.push(projectViewModeWatcher);
-  const workspaceFileWatcher = vscode.workspace.createFileSystemWatcher('**/{settings.gradle,settings.gradle.kts,build.gradle,build.gradle.kts,gradle.properties,local.properties}');
+  const workspaceFileWatcher = vscode.workspace.createFileSystemWatcher('**/{settings.gradle,settings.gradle.kts,build.gradle,build.gradle.kts,gradle.properties,local.properties,AndroidManifest.xml}');
   const invalidateFromWorkspaceChange = (): void => {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     invalidateFastCaches(workspaceRoot);
@@ -4332,25 +6629,74 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!(await ensureFeatureAllowed('diagnostics'))) {
         return;
       }
+      ensureDiagnosticsDataLoaded();
       await collectDiagnosticsSnapshot();
+    }),
+    vscode.commands.registerCommand('android-toolkit.projectDoctor', async () => {
+      await runProjectDoctorCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.openRunFailureReport', async () => {
       if (!(await ensureFeatureAllowed('diagnostics'))) {
         return;
       }
+      ensureDiagnosticsDataLoaded();
       await openRunFailureReport();
     }),
-    vscode.commands.registerCommand('android-toolkit.openStartupProfiler', () => {
+    vscode.commands.registerCommand('android-toolkit.openCrashAnrTriage', async () => {
+      if (!(await ensureFeatureAllowed('diagnostics'))) {
+        return;
+      }
+      ensureDiagnosticsDataLoaded();
+      await openCrashAnrTriageReport();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openGradleBottleneckAnalyzer', async () => {
+      if (!(await ensureFeatureAllowed('diagnostics'))) {
+        return;
+      }
+      ensureDiagnosticsDataLoaded();
+      await openGradleBottleneckAnalyzer();
+    }),
+    vscode.commands.registerCommand('android-toolkit.saveDeviceStateProfile', async () => {
+      await saveDeviceStateProfileCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.applyDeviceStateProfile', async () => {
+      await applyDeviceStateProfileCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.listDeviceStateProfiles', async () => {
+      const profiles = await listDeviceStateProfiles();
+      return profiles.map(item => ({
+        id: item.id,
+        name: item.name,
+        deviceId: item.deviceId,
+        moduleName: item.moduleName,
+        updatedAt: item.updatedAt,
+      }));
+    }),
+    vscode.commands.registerCommand(
+      'android-toolkit.applyDeviceStateProfileByName',
+      async (payload?: { profileName?: string; deviceId?: string; moduleName?: string; packageName?: string }) => {
+        if (!payload?.profileName || !payload?.deviceId) {
+          return { success: false, message: 'profileName and deviceId are required.' };
+        }
+        return applyDeviceStateProfileByName(payload.profileName, payload.deviceId, payload.moduleName, payload.packageName);
+      }
+    ),
+    vscode.commands.registerCommand('android-toolkit.runTestsWithDeviceStateProfile', async () => {
+      await runTestsWithDeviceStateProfileCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openStartupProfiler', async () => {
       if (!isFeatureAllowed('diagnostics')) {
         void ensureFeatureAllowed('diagnostics');
         return;
       }
+      ensureDiagnosticsDataLoaded();
       openStartupProfilerPanel();
     }),
     vscode.commands.registerCommand('android-toolkit.openActionReplayReport', async () => {
       if (!(await ensureFeatureAllowed('diagnostics'))) {
         return;
       }
+      ensureDiagnosticsDataLoaded();
       await openActionReplayReport();
     }),
     vscode.commands.registerCommand('android-toolkit.openLastFailedStep', async () => {
@@ -4363,6 +6709,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!(await ensureFeatureAllowed('diagnostics'))) {
         return;
       }
+      ensureDiagnosticsDataLoaded();
       await exportDiagnosticsBundleCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.releaseQualityGate', async () => {
@@ -4397,6 +6744,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void ensureFeatureAllowed('diagnostics');
         return;
       }
+      ensureDiagnosticsDataLoaded();
       openFailureInsightsPanel();
     }),
     vscode.commands.registerCommand('android-toolkit.openSloDashboard', () => {
@@ -4404,6 +6752,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void ensureFeatureAllowed('diagnostics');
         return;
       }
+      ensureDiagnosticsDataLoaded();
       openSloDashboardPanel();
     }),
     vscode.commands.registerCommand('android-toolkit.openErrorKnowledgeBase', () => {
@@ -4411,6 +6760,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void ensureFeatureAllowed('diagnostics');
         return;
       }
+      ensureDiagnosticsDataLoaded();
       openErrorKnowledgeBasePanel();
     }),
     vscode.commands.registerCommand('android-toolkit.exportTeamConfig', async () => {
@@ -4418,6 +6768,45 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('android-toolkit.importTeamConfig', async () => {
       await importTeamSettingsCommand(context);
+    }),
+    vscode.commands.registerCommand('android-toolkit.teamPolicyDriftReport', async () => {
+      await openTeamPolicyDriftReportCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.performanceRegressionGuardrail', async () => {
+      await runPerformanceRegressionGuardrailCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.guidedFirstRunSuccessPath', async () => {
+      await runGuidedFirstSuccessPathCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.whatNext', async () => {
+      await openNextActionSurfaceCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openIntelligenceHub', async () => {
+      await openIntelligenceHubCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.runIntelligenceMatrixSmoke', async () => {
+      await runIntelligenceMatrixSmokeCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.exportIntelligencePrHeatmap', async () => {
+      await exportIntelligencePrHeatmapCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.approveReleaseRiskOverride', async () => {
+      await approveReleaseRiskOverrideCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.enforcePolicyAsCode', async () => {
+      await enforcePolicyAsCodeCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.replayDeepLinkFuzzCase', async () => {
+      await replayDeepLinkFuzzCaseCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.runTeamPlaybook', async () => {
+      await runTeamPlaybookCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.runFocusedPrChecks', async () => {
+      await runFocusedPrChecksCommand();
+    }),
+    vscode.commands.registerCommand('android-toolkit.openTelemetryDashboard', async () => {
+      await openLocalTelemetryDashboardCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.ciSmoke', async () => {
       await runCiSmoke(context);
@@ -4442,8 +6831,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand('android-toolkit.openLogcat');
       showInfo('In Logcat, click "Only this app".');
     }),
-    vscode.commands.registerCommand('android-toolkit.runAppOnEmulator', () => {
-      runAppOnEmulator();
+    vscode.commands.registerCommand('android-toolkit.runAppOnEmulator', async () => {
+      await withCommandBudget('android-toolkit.runAppOnEmulator', async () => {
+        await runAppOnEmulator();
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.selectDevice', () => {
       selectDeviceCommand();
@@ -4451,25 +6842,30 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('android-toolkit.selectModule', () => {
       selectModuleCommand();
     }),
-    vscode.commands.registerCommand('android-toolkit.runAppOnTargetSelected', () => {
-      runAppOnTargetSelected();
+    vscode.commands.registerCommand('android-toolkit.runAppOnTargetSelected', async () => {
+      await withCommandBudget('android-toolkit.runAppOnTargetSelected', async () => {
+        await runAppOnTargetSelected();
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.stopApp', () => {
       stopAppCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.gradleSync', async () => {
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!workspaceRoot) {
-        showError('No workspace folder open.');
-        return;
-      }
-      invalidateGradleTaskCache(workspaceRoot);
-      const result = await runGradleTaskWithResult(workspaceRoot, 'tasks');
-      showGradleOutput('tasks', result, workspaceRoot);
-      if (result.exitCode === 0) {
+      await withCommandBudget('android-toolkit.gradleSync', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceRoot) {
+          showError('No workspace folder open.');
+          return;
+        }
         invalidateGradleTaskCache(workspaceRoot);
-      }
-      result.exitCode === 0 ? showInfo('Gradle sync completed') : showError('Gradle sync failed');
+        const result = await runGradleTaskWithResult(workspaceRoot, 'tasks');
+        showGradleOutput('tasks', result, workspaceRoot);
+        await captureGradleBottlenecks('tasks', result.exitCode, result.stdout || '', result.stderr || '');
+        if (result.exitCode === 0) {
+          invalidateGradleTaskCache(workspaceRoot);
+        }
+        result.exitCode === 0 ? showInfo('Gradle sync completed') : showError('Gradle sync failed');
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.projectHealth', () => {
       const issues = checkProjectHealth();
@@ -4484,8 +6880,10 @@ export function activate(context: vscode.ExtensionContext): void {
       issues.forEach(i => channel.appendLine(`- ${i.title}${i.fix ? ` | Fix: ${i.fix}` : ''}`));
       showWarning(`Project health issues: ${issues.map(i => i.title).join(', ')}`);
     }),
-    vscode.commands.registerCommand('android-toolkit.runAppOnDevice', () => {
-      runAppOnDevice();
+    vscode.commands.registerCommand('android-toolkit.runAppOnDevice', async () => {
+      await withCommandBudget('android-toolkit.runAppOnDevice', async () => {
+        await runAppOnDevice();
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.selectBuildVariant', async () => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -4602,7 +7000,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const defaultRunPipeline = { clean: false, assemble: false, install: true, run: true };
       const resolveLaunchTarget = (workspaceRoot: string, moduleName: string, launchTargetId?: string): LaunchTarget | undefined => {
         const packageName = findApplicationId(workspaceRoot, moduleName) || '';
-        const targets = listManifestLaunchTargets(workspaceRoot, moduleName, packageName);
+        const targets = listManifestLaunchTargetsCached(workspaceRoot, moduleName, packageName);
         return targets.find(t => t.id === (launchTargetId || 'launcher')) || targets[0];
       };
       const runLaunchTarget = async (
@@ -4695,7 +7093,47 @@ export function activate(context: vscode.ExtensionContext): void {
         if (preflight.warnings && preflight.warnings.length > 0) {
           showWarning(`Device health warnings: ${preflight.warnings.join(' | ')}`);
         }
+        let assembleHandledByBatch = false;
+        if (pipeline.clean && pipeline.assemble) {
+          const tBatch = Date.now();
+          const task = `:${moduleName}:assemble${variant}`;
+          const batchGuard = await runGuarded(
+            'Clean + Assemble APK',
+            () => runGradleTaskWithResult(workspaceRoot, 'clean', [task]),
+            { timeoutMs: 300_000, retries: 1, shouldCancel }
+          );
+          if (!batchGuard.ok || !batchGuard.value) {
+            operationManager.finish(RUN_PANEL_SCOPE, opId);
+            pushTimeline({ action: 'Run', stage: 'clean+assemble', status: 'failed', moduleName, variant, deviceId, durationMs: Date.now() - tBatch, message: 'Pre-run clean+assemble failed' });
+            return finalizeRunResult(
+              'Run',
+              issueToRunResult(batchGuard.issue!, 'Pre-run clean+assemble failed.', fixSuggestionsForGradle()),
+              moduleName,
+              variant,
+              deviceId,
+              Date.now() - startedAt
+            );
+          }
+          showGradleOutput(`clean + ${task}`, batchGuard.value, workspaceRoot);
+          await captureGradleBottlenecks(`clean + ${task}`, batchGuard.value.exitCode, batchGuard.value.stdout || '', batchGuard.value.stderr || '');
+          if (batchGuard.value.exitCode !== 0) {
+            operationManager.finish(RUN_PANEL_SCOPE, opId);
+            pushTimeline({ action: 'Run', stage: 'clean+assemble', status: 'failed', moduleName, variant, deviceId, durationMs: Date.now() - tBatch, message: 'Gradle clean+assemble failed' });
+            return finalizeRunResult('Run', {
+              success: false,
+              message: 'Pre-run clean+assemble failed.',
+              gradleError: summarizeGradleError(batchGuard.value.stderr || batchGuard.value.stdout || ''),
+              fixSuggestions: fixSuggestionsForGradle(),
+            }, moduleName, variant, deviceId, Date.now() - startedAt);
+          }
+          pushTimeline({ action: 'Run', stage: 'clean', status: 'success', moduleName, variant, deviceId, durationMs: Date.now() - tBatch, message: 'Pre-run clean completed (batched)' });
+          pushTimeline({ action: 'Run', stage: 'assemble', status: 'success', moduleName, variant, deviceId, durationMs: Date.now() - tBatch, message: 'Pre-run assemble completed (batched)' });
+          assembleHandledByBatch = true;
+        }
         if (pipeline.clean) {
+          if (assembleHandledByBatch) {
+            // Already executed via single Gradle process.
+          } else {
           const tClean = Date.now();
           const cleanGuard = await runGuarded(
             'Clean project',
@@ -4726,8 +7164,12 @@ export function activate(context: vscode.ExtensionContext): void {
             }, moduleName, variant, deviceId, Date.now() - startedAt);
           }
           pushTimeline({ action: 'Run', stage: 'clean', status: 'success', moduleName, variant, deviceId, durationMs: Date.now() - tClean, message: 'Pre-run clean completed' });
+          }
         }
         if (pipeline.assemble) {
+          if (assembleHandledByBatch) {
+            // Already executed via single Gradle process.
+          } else {
           const tAssemble = Date.now();
           const buildGuard = await runGuarded(
             'Assemble APK',
@@ -4747,6 +7189,7 @@ export function activate(context: vscode.ExtensionContext): void {
             );
           }
           pushTimeline({ action: 'Run', stage: 'assemble', status: 'success', moduleName, variant, deviceId, durationMs: Date.now() - tAssemble, message: 'Pre-run assemble completed' });
+          }
         }
         let installDiff: { title: string; lines: string[] } | undefined;
         if (pipeline.install) {
@@ -4895,7 +7338,7 @@ export function activate(context: vscode.ExtensionContext): void {
             return [{ id: 'launcher', label: 'Default Launcher Activity', type: 'launcher' as const }];
           }
           const packageName = findApplicationId(workspaceFolder.uri.fsPath, moduleName) || '';
-          return listManifestLaunchTargets(workspaceFolder.uri.fsPath, moduleName, packageName);
+          return listManifestLaunchTargetsCached(workspaceFolder.uri.fsPath, moduleName, packageName);
         },
         setLaunchTarget: async (moduleName: string, launchTargetId: string) => {
           await setSelectedLaunchTarget(moduleName, launchTargetId);
@@ -5110,6 +7553,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           const result = cleanGuard.value;
           showGradleOutput('clean', result, workspaceFolder.uri.fsPath);
+          await captureGradleBottlenecks('clean', result.exitCode, result.stdout || '', result.stderr || '');
           if (result.exitCode === 0) {
             invalidateGradleTaskCache(workspaceFolder.uri.fsPath);
             lastGradleErrorSummary = undefined;
@@ -5178,24 +7622,13 @@ export function activate(context: vscode.ExtensionContext): void {
         applyFix: async (fixId: string, _moduleName: string, _deviceId: string) => {
           return applyRunFixTracked(fixId);
         },
-        getHealth: async () => {
-          const health = await getLanguageHealthStatus();
-          if (!health.hasJavaExtension || !health.hasKotlinExtension) {
-            const missing = [
-              !health.hasJavaExtension ? 'Java extension' : undefined,
-              !health.hasKotlinExtension ? 'Kotlin extension' : undefined,
-            ].filter(Boolean).join(', ');
-            return { state: 'error' as const, message: `Runtime health: missing ${missing}` };
-          }
-          if (health.kotlinRiskOnJava25) {
-            return {
-              state: 'warning' as const,
-              message: `Runtime health: Java ${health.javaVersion || health.javaMajor} may break Kotlin LS. Prefer JDK 21.`,
-            };
-          }
+        getHealth: async (healthContext?: { moduleName?: string; deviceId?: string; variant?: string }) => {
+          const smart = await getSmartRunHealthContext(healthContext);
           return {
-            state: 'ok' as const,
-            message: `Runtime health: Java ${health.javaVersion || health.javaMajor || 'unknown'} + Kotlin extension OK`,
+            state: smart.state,
+            message: smart.message,
+            score: smart.score,
+            recommendations: smart.recommendations,
           };
         },
         getUiConfig: async () => {
@@ -5290,6 +7723,61 @@ export function activate(context: vscode.ExtensionContext): void {
             await vscode.commands.executeCommand('android-toolkit.firstRunHealthWizard');
             return { success: true, message: 'Health wizard opened.' };
           }
+          if (actionId === 'project-doctor') {
+            await runProjectDoctorCommand();
+            return { success: true, message: 'Project doctor finished.' };
+          }
+          if (actionId === 'what-next') {
+            await openNextActionSurfaceCommand();
+            return { success: true, message: 'What Next panel opened.' };
+          }
+          if (actionId === 'align-policy') {
+            await vscode.commands.executeCommand('android-toolkit.teamPolicyDriftReport');
+            return { success: true, message: 'Team policy drift panel opened.' };
+          }
+          if (actionId === 'crash-anr-triage') {
+            await openCrashAnrTriageReport();
+            return { success: true, message: 'Crash/ANR triage opened.' };
+          }
+          if (actionId === 'run-gradle-doctor') {
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+              return { success: false, message: 'No workspace folder open.' };
+            }
+            await runGradleDoctor(workspaceFolder.uri.fsPath);
+            return { success: true, message: 'Gradle doctor completed.' };
+          }
+          if (actionId === 'set-jdk21') {
+            const ok = await setJdk21Path();
+            return { success: ok, message: ok ? 'JDK path updated.' : 'JDK update canceled.' };
+          }
+          if (actionId === 'select-device') {
+            await selectDeviceCommand();
+            return { success: true, message: 'Select device flow opened.' };
+          }
+          if (actionId === 'select-module') {
+            await selectModuleCommand();
+            return { success: true, message: 'Select module flow opened.' };
+          }
+          if (actionId === 'select-variant') {
+            await vscode.commands.executeCommand('android-toolkit.selectBuildVariant');
+            return { success: true, message: 'Select variant flow opened.' };
+          }
+          if (actionId === 'smart-clean-build') {
+            await vscode.commands.executeCommand('android-toolkit.gradleClean');
+            return { success: true, message: 'Gradle clean started.' };
+          }
+          if (actionId === 'cold-boot-selected-emulator') {
+            if (!_deviceId || !_deviceId.startsWith('emulator-')) {
+              return { success: false, message: 'Selected target is not an emulator.' };
+            }
+            const avdName = await getAvdNameForDevice(_deviceId);
+            if (!avdName) {
+              return { success: false, message: 'Unable to resolve emulator AVD name.' };
+            }
+            const result = await coldBoot(_deviceId, avdName);
+            return { success: result.success, message: result.message };
+          }
           if (actionId === 'open-last-failed') {
             await openLastFailedStepCommand();
             return { success: true, message: 'Opened last failed step.' };
@@ -5381,52 +7869,56 @@ export function activate(context: vscode.ExtensionContext): void {
       buildSignedBundle();
     }),
     vscode.commands.registerCommand('android-toolkit.analyzeApk', async () => {
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      const apkUri = await vscode.window.showOpenDialog({
-        canSelectFiles: true,
-        filters: { 'APK Files': ['apk'] },
-        title: 'Select APK to Analyze',
-      });
-      if (apkUri && apkUri[0]) {
-        const { ApkAnalyzerPanel } = lazyLoad<typeof import('./apk/apkAnalyzerPanel')>('./apk/apkAnalyzerPanel');
-        await ApkAnalyzerPanel.createOrShow(apkUri[0].fsPath);
-        return;
-      }
-      if (workspaceFolder) {
-        const moduleName = await selectModule(workspaceFolder.uri.fsPath);
-        if (!moduleName) {
+      await withCommandBudget('android-toolkit.analyzeApk', async () => {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        const apkUri = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          filters: { 'APK Files': ['apk'] },
+          title: 'Select APK to Analyze',
+        });
+        if (apkUri && apkUri[0]) {
+          const { ApkAnalyzerPanel } = lazyLoad<typeof import('./apk/apkAnalyzerPanel')>('./apk/apkAnalyzerPanel');
+          await ApkAnalyzerPanel.createOrShow(apkUri[0].fsPath);
           return;
         }
-        const apkPath = findLatestApk(workspaceFolder.uri.fsPath, moduleName);
-        if (apkPath) {
-          const { ApkAnalyzerPanel } = lazyLoad<typeof import('./apk/apkAnalyzerPanel')>('./apk/apkAnalyzerPanel');
-          await ApkAnalyzerPanel.createOrShow(apkPath);
-        } else {
-          showError('No APK found. Build the selected variant first.');
+        if (workspaceFolder) {
+          const moduleName = await selectModule(workspaceFolder.uri.fsPath);
+          if (!moduleName) {
+            return;
+          }
+          const apkPath = findLatestApk(workspaceFolder.uri.fsPath, moduleName);
+          if (apkPath) {
+            const { ApkAnalyzerPanel } = lazyLoad<typeof import('./apk/apkAnalyzerPanel')>('./apk/apkAnalyzerPanel');
+            await ApkAnalyzerPanel.createOrShow(apkPath);
+          } else {
+            showError('No APK found. Build the selected variant first.');
+          }
         }
-      }
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.compareApk', async () => {
-      const first = await vscode.window.showOpenDialog({
-        canSelectFiles: true,
-        canSelectMany: false,
-        filters: { 'APK Files': ['apk'] },
-        title: 'Select first APK',
+      await withCommandBudget('android-toolkit.compareApk', async () => {
+        const first = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectMany: false,
+          filters: { 'APK Files': ['apk'] },
+          title: 'Select first APK',
+        });
+        if (!first || !first[0]) {
+          return;
+        }
+        const second = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectMany: false,
+          filters: { 'APK Files': ['apk'] },
+          title: 'Select second APK',
+        });
+        if (!second || !second[0]) {
+          return;
+        }
+        const { ApkComparePanel } = lazyLoad<typeof import('./apk/apkComparePanel')>('./apk/apkComparePanel');
+        await ApkComparePanel.createOrShow(first[0].fsPath, second[0].fsPath);
       });
-      if (!first || !first[0]) {
-        return;
-      }
-      const second = await vscode.window.showOpenDialog({
-        canSelectFiles: true,
-        canSelectMany: false,
-        filters: { 'APK Files': ['apk'] },
-        title: 'Select second APK',
-      });
-      if (!second || !second[0]) {
-        return;
-      }
-      const { ApkComparePanel } = lazyLoad<typeof import('./apk/apkComparePanel')>('./apk/apkComparePanel');
-      await ApkComparePanel.createOrShow(first[0].fsPath, second[0].fsPath);
     }),
     vscode.commands.registerCommand('android-toolkit.createLaunchProfile', async () => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -5439,50 +7931,52 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     }),
     vscode.commands.registerCommand('android-toolkit.runLaunchProfile', async () => {
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!workspaceFolder) {
-        showError('No workspace folder open.');
-        return;
-      }
-      const profile = await selectLaunchProfile(workspaceFolder.uri.fsPath);
-      if (!profile) {
-        return;
-      }
-      if (profile.task) {
-        const result = await withProgress(`Running ${profile.task}...`, async () => {
-          return runGradleTaskWithResult(workspaceFolder.uri.fsPath, profile.task as string);
-        });
-        showGradleOutput(profile.task as string, result, workspaceFolder.uri.fsPath);
-        if (result.exitCode !== 0) {
-          showError(`Task failed: ${profile.task}`);
+      await withCommandBudget('android-toolkit.runLaunchProfile', async () => {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          showError('No workspace folder open.');
           return;
         }
-      }
-      let deviceId: string | undefined;
-      if (profile.target === 'emulator') {
-        const emulators = await listRunningEmulators();
-        if (emulators.length === 0) {
-          showWarning('No running emulators. Start an emulator first.');
+        const profile = await selectLaunchProfile(workspaceFolder.uri.fsPath);
+        if (!profile) {
           return;
         }
-        deviceId = emulators.length === 1 ? emulators[0].id : (await pickDevice(emulators))?.id;
-      } else if (profile.target === 'device') {
-        const devices = await listDevicesDetailed();
-        const physical = devices.filter(d => d.type === 'physical' && d.status === 'online');
-        if (physical.length === 0) {
-          showWarning('No physical devices found.');
+        if (profile.task) {
+          const result = await withProgress(`Running ${profile.task}...`, async () => {
+            return runGradleTaskWithResult(workspaceFolder.uri.fsPath, profile.task as string);
+          });
+          showGradleOutput(profile.task as string, result, workspaceFolder.uri.fsPath);
+          if (result.exitCode !== 0) {
+            showError(`Task failed: ${profile.task}`);
+            return;
+          }
+        }
+        let deviceId: string | undefined;
+        if (profile.target === 'emulator') {
+          const emulators = await listRunningEmulators();
+          if (emulators.length === 0) {
+            showWarning('No running emulators. Start an emulator first.');
+            return;
+          }
+          deviceId = emulators.length === 1 ? emulators[0].id : (await pickDevice(emulators))?.id;
+        } else if (profile.target === 'device') {
+          const devices = await listDevicesDetailed();
+          const physical = devices.filter(d => d.type === 'physical' && d.status === 'online');
+          if (physical.length === 0) {
+            showWarning('No physical devices found.');
+            return;
+          }
+          deviceId = physical.length === 1 ? physical[0].id : (await pickDevice(physical))?.id;
+        } else {
+          const devices = await listDevicesDetailed();
+          const online = devices.filter(d => d.status === 'online');
+          deviceId = online.length === 1 ? online[0].id : (await pickDevice(online))?.id;
+        }
+        if (!deviceId) {
           return;
         }
-        deviceId = physical.length === 1 ? physical[0].id : (await pickDevice(physical))?.id;
-      } else {
-        const devices = await listDevicesDetailed();
-        const online = devices.filter(d => d.status === 'online');
-        deviceId = online.length === 1 ? online[0].id : (await pickDevice(online))?.id;
-      }
-      if (!deviceId) {
-        return;
-      }
-      await runAppOnTarget(workspaceFolder.uri.fsPath, profile.module, profile.variant, deviceId);
+        await runAppOnTarget(workspaceFolder.uri.fsPath, profile.module, profile.variant, deviceId);
+      });
     }),
     vscode.commands.registerCommand('android-toolkit.deleteLaunchProfile', async () => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -5578,6 +8072,7 @@ export function activate(context: vscode.ExtensionContext): void {
       QuickActionsPanel.createOrShow();
     }),
     vscode.commands.registerCommand('android-toolkit.openCrashSymbolicator', () => {
+      const { CrashSymbolicatorPanel } = lazyLoad<typeof import('./diagnostics/crashSymbolicatorPanel')>('./diagnostics/crashSymbolicatorPanel');
       CrashSymbolicatorPanel.createOrShow();
     }),
     vscode.commands.registerCommand('android-toolkit.openDeepLinkStudio', () => {
@@ -5665,15 +8160,19 @@ export function activate(context: vscode.ExtensionContext): void {
       validateManifestCommand();
     }),
     vscode.commands.registerCommand('android-toolkit.insertManifestTemplate', () => {
+      const { insertManifestTemplate } = lazyLoad<typeof import('./projectView/manifestTools')>('./projectView/manifestTools');
       insertManifestTemplate();
     }),
     vscode.commands.registerCommand('android-toolkit.addManifestEntry', () => {
+      const { addManifestEntryFlow } = lazyLoad<typeof import('./projectView/manifestTools')>('./projectView/manifestTools');
       addManifestEntryFlow();
     }),
     vscode.commands.registerCommand('android-toolkit.openManifestEditor', () => {
+      const { openManifestEditor } = lazyLoad<typeof import('./projectView/manifestTools')>('./projectView/manifestTools');
       openManifestEditor();
     }),
     vscode.commands.registerCommand('android-toolkit.manifestDiffAssistant', () => {
+      const { runManifestDiffAssistant } = lazyLoad<typeof import('./projectView/manifestDiffAssistant')>('./projectView/manifestDiffAssistant');
       runManifestDiffAssistant();
     }),
     vscode.commands.registerCommand('android-toolkit.validateResources', () => {
@@ -5698,6 +8197,7 @@ export function activate(context: vscode.ExtensionContext): void {
       bulkMoveResources();
     }),
     vscode.commands.registerCommand('android-toolkit.scanApiCompatibility', () => {
+      const { runApiCompatibilityScanner } = lazyLoad<typeof import('./core/apiCompatibilityScanner')>('./core/apiCompatibilityScanner');
       runApiCompatibilityScanner();
     }),
     vscode.commands.registerCommand('android-toolkit.jumpToNavDestination', () => {
@@ -6044,6 +8544,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('android-toolkit.openProfiler', () => {
+      const { ProfilerPanel } = lazyLoad<typeof import('./profiler/profilerPanel')>('./profiler/profilerPanel');
       ProfilerPanel.createOrShow(context.extensionUri);
     }),
   ];
@@ -6051,7 +8552,9 @@ export function activate(context: vscode.ExtensionContext): void {
   recordStartupPhase('commands:register', tCommands, activationStartedAt);
   void startSession(context);
   logPerf('activate:commandsRegistered', Date.now() - activationStartedAt);
-  checkLanguageExtensions(context).catch(() => {});
+  setTimeout(() => {
+    checkLanguageExtensions(context).catch(() => {});
+  }, 1800);
   setTimeout(() => {
     openOnboardingV2Panel(false).catch(() => {});
   }, 1200);
@@ -6085,6 +8588,10 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(new vscode.Disposable(() => backgroundScheduler.stop('emulatorStateProbe')));
   }
   startupProfilerTotalMs = Date.now() - activationStartedAt;
+  trackSlowPathMetric('activateExtension', startupProfilerTotalMs, true);
+  if (startupProfilerTotalMs > ACTIVATION_BUDGET_MS) {
+    logPerf('activate:budgetExceeded', startupProfilerTotalMs);
+  }
   void persistStartupProfiler();
   logPerf('activate:total', Date.now() - activationStartedAt);
 }

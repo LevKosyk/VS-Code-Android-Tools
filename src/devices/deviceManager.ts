@@ -59,17 +59,17 @@ export async function getDeviceInfo(deviceId: string): Promise<Partial<AndroidDe
   const sdk = detectSdk();
   const info: Partial<AndroidDevice> = {};
   try {
-    const modelResult = await execCommand(sdk.adb, [
-      '-s', deviceId, 'shell', 'getprop', 'ro.product.model'
+    const propsResult = await execCommand(sdk.adb, [
+      '-s', deviceId, 'shell', 'getprop', 'ro.product.model;getprop ro.build.version.release'
     ]);
-    if (modelResult.exitCode === 0 && modelResult.stdout) {
-      info.model = modelResult.stdout;
-    }
-    const versionResult = await execCommand(sdk.adb, [
-      '-s', deviceId, 'shell', 'getprop', 'ro.build.version.release'
-    ]);
-    if (versionResult.exitCode === 0 && versionResult.stdout) {
-      info.androidVersion = versionResult.stdout;
+    if (propsResult.exitCode === 0 && propsResult.stdout) {
+      const lines = propsResult.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      if (lines[0]) {
+        info.model = lines[0];
+      }
+      if (lines[1]) {
+        info.androidVersion = lines[1];
+      }
     }
   } catch {
   }

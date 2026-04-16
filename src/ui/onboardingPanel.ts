@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getWebviewThemeStyle } from './webviewTheme';
+import { getSharedPanelUiKitStyle, getWebviewThemeStyle } from './webviewTheme';
 
 export type OnboardingCheck = {
   id: string;
@@ -88,26 +88,20 @@ export class OnboardingPanel {
 
   private html(): string {
     const themeVars = getWebviewThemeStyle();
+    const kit = getSharedPanelUiKitStyle();
     return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8" />
 <style>
 ${themeVars}
-body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); font-size: var(--at-font-size, 13px); padding: var(--at-space-4); }
-h2 { margin: 0 0 var(--at-space-3) 0; font-size: var(--at-type-title); font-weight: 700; }
-.card { border: 1px solid var(--vscode-widget-border); border-radius: var(--at-radius-md); padding: var(--at-space-3); margin-bottom: var(--at-space-3); }
+${kit}
 .ok { border-left: 4px solid #22c55e; }
 .warn { border-left: 4px solid #f59e0b; }
 .step-title { font-weight: 700; margin-bottom: var(--at-space-2); font-size: var(--at-type-section); }
 .row { display: flex; justify-content: space-between; gap: var(--at-space-3); align-items: center; }
 .title { font-weight: 600; margin-bottom: var(--at-space-1); font-size: var(--at-type-label); }
 .meta { opacity: 0.86; font-size: var(--at-type-helper); }
-button { border: 1px solid var(--vscode-widget-border); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius: var(--at-radius-sm); padding: var(--at-control-padding-y, 6px) var(--at-control-padding-x, 8px); cursor: pointer; min-height: var(--at-table-row-height, 34px); font-size: var(--at-type-label); font-weight: 600; }
-button.btn-primary { background: var(--at-info); color: var(--at-info-contrast); border-color: transparent; }
-button.btn-secondary { background: transparent; color: var(--vscode-foreground); }
-button.btn-tertiary { background: transparent; border-style: dashed; color: var(--vscode-descriptionForeground); font-weight: 500; }
-button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .actions { display: flex; gap: var(--at-space-2); margin-bottom: var(--at-space-3); flex-wrap: wrap; }
 .score { border: 1px solid var(--vscode-widget-border); border-radius: var(--at-radius-md); padding: var(--at-space-3); margin-bottom: var(--at-space-4); }
 .score-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--at-space-2); }
@@ -115,35 +109,42 @@ button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-off
 .bar { width: 100%; height: 10px; border-radius: 999px; background: #1f2937; overflow: hidden; }
 .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #f59e0b, #22c55e); transition: width .2s ease; }
 .ready { border: 1px solid #22c55e66; background: #22c55e22; border-radius: var(--at-radius-md); padding: var(--at-space-3); margin-bottom: var(--at-space-3); font-weight: 700; display:none; font-size: var(--at-type-section); }
+details.at-more > summary { cursor: pointer; font-size: var(--at-type-helper); color: var(--vscode-descriptionForeground); }
 </style>
 </head>
-<body>
-  <h2>Android Onboarding v2</h2>
-  <div class="score">
+<body class="at-page">
+  <h2 class="at-title">Android Onboarding v2</h2>
+  <div class="score at-card">
     <div class="score-head">
       <div>Environment Health Score</div>
       <div id="scoreValue" class="score-value">0%</div>
     </div>
     <div class="bar"><div id="scoreFill" class="bar-fill"></div></div>
   </div>
+  <div id="loadingState" class="at-card">
+    <div class="at-loading-text">Checking your environment and collecting fixes...</div>
+    <div class="at-skeleton at-skeleton-lg"></div>
+  </div>
+  <div id="feedback" class="at-meta"></div>
   <div id="ready" class="ready">Environment ready</div>
-  <div class="card">
+  <div class="at-card">
     <div class="step-title">Step 1/3 — Validate environment</div>
     <div id="checks"></div>
   </div>
-  <div class="card">
+  <div class="at-card">
     <div class="step-title">Step 2/3 — Apply fixes</div>
     <div class="actions">
-      <button id="refresh" class="btn-tertiary">Refresh</button>
-      <button id="fixAll" class="btn-secondary">Fix All Detected Issues</button>
-      <button id="openRun" class="btn-primary">Open Run Panel</button>
+      <button id="refresh" class="at-btn at-btn-tertiary">Refresh</button>
+      <button id="fixAll" class="at-btn at-btn-secondary">Fix All Detected Issues</button>
+      <button id="fixNext" class="at-btn at-btn-primary">Fix Next Issue (Alt+N)</button>
+      <button id="openRun" class="at-btn at-btn-primary">Open Run Panel</button>
     </div>
   </div>
-  <div class="card">
+  <div class="at-card">
     <div class="step-title">Step 3/3 — Test run + feedback</div>
     <div class="actions">
-      <button id="testRun" class="btn-primary">Test Run</button>
-      <button id="feedback" class="btn-tertiary">Send UX Feedback</button>
+      <button id="testRun" class="at-btn at-btn-primary">Test Run</button>
+      <button id="feedbackBtn" class="at-btn at-btn-tertiary">Send UX Feedback</button>
     </div>
     <div id="testRunStatus" class="meta">Test run not executed yet.</div>
   </div>
@@ -154,18 +155,36 @@ const scoreValueEl = document.getElementById('scoreValue');
 const scoreFillEl = document.getElementById('scoreFill');
 const readyEl = document.getElementById('ready');
 const testRunStatusEl = document.getElementById('testRunStatus');
+const loadingStateEl = document.getElementById('loadingState');
+const feedbackEl = document.getElementById('feedback');
+let nextFixId = '';
 document.getElementById('refresh').onclick = () => vscode.postMessage({ type: 'refresh' });
 document.getElementById('fixAll').onclick = () => vscode.postMessage({ type: 'fixAll' });
+document.getElementById('fixNext').onclick = () => {
+  if (!nextFixId) return;
+  feedbackEl.textContent = 'Applying next fix...';
+  vscode.postMessage({ type: 'fix', id: nextFixId });
+};
 document.getElementById('openRun').onclick = () => vscode.postMessage({ type: 'openRunPanel' });
 document.getElementById('testRun').onclick = () => {
   testRunStatusEl.textContent = 'Running test run...';
   vscode.postMessage({ type: 'testRun' });
 };
-document.getElementById('feedback').onclick = () => vscode.postMessage({ type: 'sendFeedback' });
+document.getElementById('feedbackBtn').onclick = () => vscode.postMessage({ type: 'sendFeedback' });
+window.addEventListener('keydown', (e) => {
+  if (e.altKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    document.getElementById('fixNext').click();
+  }
+});
 window.addEventListener('message', (event) => {
   const m = event.data;
   if (m.type !== 'checks') return;
+  loadingStateEl.style.display = 'none';
   const checks = m.checks || [];
+  const next = checks.find(c => !c.ok);
+  nextFixId = next ? next.id : '';
+  document.getElementById('fixNext').disabled = !nextFixId;
   const okCount = checks.filter(c => c.ok).length;
   const total = checks.length || 1;
   const score = Math.round((okCount / total) * 100);
@@ -175,15 +194,16 @@ window.addEventListener('message', (event) => {
   checksEl.innerHTML = '';
   for (const c of checks) {
     const card = document.createElement('div');
-    card.className = 'card ' + (c.ok ? 'ok' : 'warn');
+    card.className = 'at-card ' + (c.ok ? 'ok' : 'warn');
     const row = document.createElement('div');
     row.className = 'row';
     const left = document.createElement('div');
-    left.innerHTML = '<div class="title">' + c.title + '</div><div class="meta">' + c.details + '</div>';
+    left.innerHTML = '<div class="title">' + c.title + '</div>' +
+      '<details class="at-more"><summary>Details</summary><div class="meta">' + c.details + '</div></details>';
     row.appendChild(left);
     if (!c.ok && c.fixLabel) {
       const btn = document.createElement('button');
-      btn.className = 'btn-secondary';
+      btn.className = 'at-btn at-btn-secondary';
       btn.textContent = c.fixLabel;
       btn.onclick = () => vscode.postMessage({ type: 'fix', id: c.id });
       row.appendChild(btn);
@@ -197,6 +217,7 @@ window.addEventListener('message', (event) => {
   if (m.type !== 'testRunResult') return;
   const result = m.result || {};
   testRunStatusEl.textContent = (result.ok ? 'Test run completed: ' : 'Test run failed: ') + (result.message || '');
+  feedbackEl.textContent = result.ok ? 'Success summary: environment looks runnable. Next: open Run Panel.' : 'Failure summary: fix highlighted checks, then retry test run.';
 });
 vscode.postMessage({ type: 'refresh' });
 </script>

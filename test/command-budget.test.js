@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { summarizeCommandBudgets, COMMAND_SLO_MS } = require('../out/insights/commandBudget.js');
+const {
+  summarizeCommandBudgets,
+  enforceCommandSloBudgets,
+  COMMAND_SLO_MS,
+} = require('../out/insights/commandBudget.js');
 
 test('summarizeCommandBudgets calculates breaches and percentiles', () => {
   const now = Date.now();
@@ -17,6 +21,26 @@ test('summarizeCommandBudgets calculates breaches and percentiles', () => {
   assert.ok(run);
   assert.equal(open.samples, 2);
   assert.equal(open.breaches, 1);
+  assert.equal(typeof open.p50Ms, 'number');
+  assert.equal(typeof open.p95Ms, 'number');
+  assert.equal(typeof open.p99Ms, 'number');
+  assert.equal(typeof open.breachRatePct, 'number');
   assert.equal(open.sloMs, COMMAND_SLO_MS['android-toolkit.openRunPanel']);
   assert.equal(run.breaches, 1);
+});
+
+test('enforceCommandSloBudgets reports violations for high breach rate', () => {
+  const now = Date.now();
+  const rows = [];
+  for (let i = 0; i < 20; i += 1) {
+    rows.push({
+      commandId: 'android-toolkit.openRunPanel',
+      durationMs: i < 8 ? 900 : 120,
+      success: true,
+      timestamp: now - i,
+    });
+  }
+  const summary = summarizeCommandBudgets(rows);
+  const violations = enforceCommandSloBudgets(summary, { maxBreachRatePct: 20, minSamples: 8 });
+  assert.equal(violations.some(item => item.commandId === 'android-toolkit.openRunPanel'), true);
 });

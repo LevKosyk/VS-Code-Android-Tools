@@ -46,7 +46,12 @@ export interface RunPanelHandlers {
   rerunHistory: (historyId: string) => Promise<RunActionResult>;
   runPreset: (presetId: string, moduleName: string) => Promise<RunActionResult>;
   applyFix: (fixId: string, moduleName: string, deviceId: string) => Promise<RunActionResult>;
-  getHealth: () => Promise<{ state: 'ok' | 'warning' | 'error'; message: string }>;
+  getHealth: (context?: { moduleName?: string; deviceId?: string; variant?: string }) => Promise<{
+    state: 'ok' | 'warning' | 'error';
+    message: string;
+    score?: number;
+    recommendations?: Array<{ label: string; actionId: string }>;
+  }>;
   quickAction: (actionId: string, moduleName: string, deviceId: string) => Promise<RunActionResult>;
   getUiConfig: () => Promise<{ mode: 'beginner' | 'standard' | 'power'; runActions: string[]; shortcuts?: Record<string, string> }>;
   getModuleRunRule: (moduleName: string) => Promise<{ defaultDeviceId?: string; defaultVariant?: string; preRunPipeline?: { clean: boolean; assemble: boolean; install: boolean; run: boolean } } | undefined>;
@@ -207,6 +212,14 @@ export class RunPanel {
       case 'getTimeline': {
         const timeline = await this.handlers.getTimeline();
         this.postMessage({ type: 'timeline', timeline });
+        break;
+      }
+      case 'getHealth': {
+        const moduleName = String(message.moduleName || '');
+        const deviceId = String(message.deviceId || '');
+        const variant = String(message.variant || '');
+        const health = await this.handlers.getHealth({ moduleName, deviceId, variant });
+        this.postMessage({ type: 'health', health });
         break;
       }
       case 'build': {
@@ -652,8 +665,25 @@ export class RunPanel {
           <button id="qaArtifactsBtn" class="btn-secondary">Export Artifacts</button>
           <button id="qaLastFailedBtn" class="btn-secondary">Open Last Failed</button>
           <button id="qaHealthBtn" class="btn-tertiary">Health Wizard</button>
+          <button id="qaProjectDoctorBtn" class="btn-secondary">Project Doctor</button>
+          <button id="qaCrashAnrTriageBtn" class="btn-secondary">Crash/ANR Triage</button>
           <button id="qaReleaseGateBtn" class="btn-tertiary">Run Full Gate</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="nextActionsCard">
+    <div class="title">What Should I Do Next?</div>
+    <div class="history-meta" style="margin-bottom:8px;">Recent actions stay pinned here. Team-recommended actions are always one click away.</div>
+    <div class="row" style="align-items:flex-start; gap:12px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:260px;">
+        <div class="action-group-title" style="margin-bottom:6px;">Recently Used</div>
+        <div id="recentActions" class="pinned-row"></div>
+      </div>
+      <div style="flex:1; min-width:260px;">
+        <div class="action-group-title" style="margin-bottom:6px;">Team Recommended</div>
+        <div id="teamActions" class="pinned-row"></div>
       </div>
     </div>
   </div>
@@ -752,6 +782,8 @@ export class RunPanel {
     const historySearch = document.getElementById('historySearch');
     const historyFilter = document.getElementById('historyFilter');
     const pinnedPresets = document.getElementById('pinnedPresets');
+    const recentActions = document.getElementById('recentActions');
+    const teamActions = document.getElementById('teamActions');
     const healthEl = document.getElementById('health');
     const hintBox = document.getElementById('hintBox');
     const hintTitle = document.getElementById('hintTitle');
@@ -772,6 +804,8 @@ export class RunPanel {
     const qaArtifactsBtn = document.getElementById('qaArtifactsBtn');
     const qaLastFailedBtn = document.getElementById('qaLastFailedBtn');
     const qaHealthBtn = document.getElementById('qaHealthBtn');
+    const qaProjectDoctorBtn = document.getElementById('qaProjectDoctorBtn');
+    const qaCrashAnrTriageBtn = document.getElementById('qaCrashAnrTriageBtn');
     const qaReleaseGateBtn = document.getElementById('qaReleaseGateBtn');
     const saveRuleBtn = document.getElementById('saveRuleBtn');
     const applyRuleBtn = document.getElementById('applyRuleBtn');
@@ -967,6 +1001,13 @@ export class RunPanel {
     } else {
       pinnedPresetIds = ['debug-emulator'];
     }
+    const teamRecommendedDefs = [
+      { id: 'run-now', label: 'Run now', type: 'runNow' },
+      { id: 'what-next', label: 'What Next Surface', type: 'quickAction', actionId: 'what-next' },
+      { id: 'align-policy', label: 'Align Team Policy', type: 'quickAction', actionId: 'align-policy' },
+      { id: 'project-doctor', label: 'Project Doctor', type: 'quickAction', actionId: 'project-doctor' },
+    ];
+    let recentActionIds = Array.isArray(restore.recentActionIds) ? restore.recentActionIds.slice(0, 8) : [];
     let restore = {
       module: persisted && typeof persisted.module === 'string' ? persisted.module : '',
       device: persisted && typeof persisted.device === 'string' ? persisted.device : '',
@@ -987,6 +1028,7 @@ export class RunPanel {
       historySearch: persisted && typeof persisted.historySearch === 'string' ? persisted.historySearch : '',
       historyFilter: persisted && typeof persisted.historyFilter === 'string' ? persisted.historyFilter : 'all',
       selectedHistoryId: persisted && typeof persisted.selectedHistoryId === 'string' ? persisted.selectedHistoryId : '',
+      recentActionIds: persisted && Array.isArray(persisted.recentActionIds) ? persisted.recentActionIds.filter(v => typeof v === 'string') : [],
       advancedOpen: persisted && typeof persisted.advancedOpen === 'boolean' ? persisted.advancedOpen : false,
     };
     installDiffMode.checked = restore.installDiffMode;
@@ -1032,6 +1074,7 @@ export class RunPanel {
           historySearch: historySearch.value,
           historyFilter: historyFilter.value,
           selectedHistoryId,
+          recentActionIds,
           advancedOpen: !!(advancedSection && advancedSection.open),
         });
       }
@@ -1103,6 +1146,75 @@ export class RunPanel {
       renderPinnedPresets();
     }
 
+    function registerRecentAction(actionId) {
+      if (!actionId) return;
+      recentActionIds = [actionId, ...recentActionIds.filter(id => id !== actionId)].slice(0, 8);
+      persistPanelState();
+      renderRecentActions();
+    }
+
+    function runActionById(actionId) {
+      if (!actionId) return;
+      if (actionId === 'run-now') {
+        runNowBtn.click();
+        return;
+      }
+      if (actionId === 'rerun') {
+        rerunBtn.click();
+        return;
+      }
+      if (actionId === 'release-gate') {
+        releaseGateBtn.click();
+        return;
+      }
+      if (actionId === 'refresh') {
+        refreshBtn.click();
+        return;
+      }
+      const mapping = {
+        'what-next': 'what-next',
+        'align-policy': 'align-policy',
+        'project-doctor': 'project-doctor',
+      };
+      const mapped = mapping[actionId];
+      if (!mapped) return;
+      setBusy(true);
+      vscode.postMessage({ type: 'quickAction', actionId: mapped, moduleName: moduleSelect.value, deviceId: deviceSelect.value });
+      setStatusState('running', 'Running quick action...');
+    }
+
+    function renderRecentActions() {
+      recentActions.innerHTML = '';
+      if (!recentActionIds.length) {
+        const muted = document.createElement('span');
+        muted.style.color = 'var(--muted)';
+        muted.textContent = 'No recent actions yet';
+        recentActions.appendChild(muted);
+        return;
+      }
+      recentActionIds.forEach(id => {
+        const btn = document.createElement('button');
+        btn.className = 'secondary';
+        btn.textContent = id.replaceAll('-', ' ');
+        btn.addEventListener('click', () => runActionById(id));
+        recentActions.appendChild(btn);
+      });
+    }
+
+    function renderTeamActions() {
+      teamActions.innerHTML = '';
+      teamRecommendedDefs.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = 'secondary';
+        btn.textContent = item.label;
+        btn.addEventListener('click', () => {
+          registerRecentAction(item.id);
+          runActionById(item.id);
+        });
+        teamActions.appendChild(btn);
+      });
+    }
+
     function updateActionButtons() {
       const hasModule = hasValidModule();
       const hasDevice = hasValidDevice();
@@ -1120,6 +1232,8 @@ export class RunPanel {
       qaCrashReproBtn.disabled = isBusy || !hasModule || !hasDevice;
       qaArtifactsBtn.disabled = isBusy || !hasModule || !hasDevice || !hasVariant;
       qaHealthBtn.disabled = isBusy;
+      qaProjectDoctorBtn.disabled = isBusy;
+      qaCrashAnrTriageBtn.disabled = isBusy;
       qaReleaseGateBtn.disabled = isBusy;
       launchIntentBtn.disabled = isBusy || !hasModule || !hasDevice;
       saveRuleBtn.disabled = isBusy || !hasModule;
@@ -1169,10 +1283,23 @@ export class RunPanel {
     function setHealth(health) {
       const state = (health && health.state) || 'ok';
       const message = (health && health.message) || 'Runtime health: OK';
+      const score = typeof (health && health.score) === 'number'
+        ? Math.max(0, Math.min(100, Math.round(health.score)))
+        : undefined;
       healthEl.className = 'health ' + state;
-      healthEl.textContent = message;
+      healthEl.textContent = score === undefined
+        ? message
+        : ('Preflight score: ' + score + '% · ' + message);
+      const recommendations = Array.isArray(health && health.recommendations)
+        ? health.recommendations
+        : [];
+      if (recommendations.length > 0) {
+        renderHint('Smart run recommendations', recommendations, 'quickAction');
+      } else {
+        updateEmptyHints();
+      }
     }
-    function renderHint(title, fixes) {
+    function renderHint(title, fixes, mode) {
       hintTitle.textContent = title;
       hintActions.innerHTML = '';
       (fixes || []).forEach((fix, index) => {
@@ -1181,8 +1308,18 @@ export class RunPanel {
         b.textContent = fix.label;
         b.addEventListener('click', () => {
           setBusy(true);
-          vscode.postMessage({ type: 'applyFix', fixId: fix.id, moduleName: moduleSelect.value, deviceId: deviceSelect.value });
-          setStatusState('running', 'Applying quick fix...');
+          if (mode === 'quickAction') {
+            vscode.postMessage({
+              type: 'quickAction',
+              actionId: fix.actionId || fix.id,
+              moduleName: moduleSelect.value,
+              deviceId: deviceSelect.value,
+            });
+            setStatusState('running', 'Running recommendation...');
+          } else {
+            vscode.postMessage({ type: 'applyFix', fixId: fix.id, moduleName: moduleSelect.value, deviceId: deviceSelect.value });
+            setStatusState('running', 'Applying quick fix...');
+          }
         });
         hintActions.appendChild(b);
       });
@@ -1196,14 +1333,14 @@ export class RunPanel {
         renderHint('No module selected. Open or create an Android project.', [
           { id: 'openProjectWizard', label: 'Open Project' },
           { id: 'openWorkspace', label: 'Open Workspace' },
-        ]);
+        ], 'fix');
         return;
       }
       if (!hasDevice) {
         renderHint('No online device. Start emulator or pick a device.', [
           { id: 'startEmulator', label: 'Start Emulator' },
           { id: 'selectDevice', label: 'Select Device' },
-        ]);
+        ], 'fix');
       }
     }
 
@@ -1431,9 +1568,19 @@ export class RunPanel {
       vscode.postMessage({ type: 'refresh' });
       vscode.postMessage({ type: 'getHistory' });
       vscode.postMessage({ type: 'getTimeline' });
+      requestHealth();
       if (moduleSelect.value) {
         vscode.postMessage({ type: 'getLaunchTargets', moduleName: moduleSelect.value });
       }
+    }
+
+    function requestHealth() {
+      vscode.postMessage({
+        type: 'getHealth',
+        moduleName: moduleSelect.value,
+        deviceId: deviceSelect.value,
+        variant: variantSelect.value,
+      });
     }
 
     refreshBtn.addEventListener('click', refreshAll);
@@ -1458,12 +1605,14 @@ export class RunPanel {
 
     buildBtn.addEventListener('click', () => {
       if (!validateFields(['module', 'variant'], true)) return;
+      registerRecentAction('build');
       setBusy(true);
       vscode.postMessage({ type: 'build', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
       setStatusState('running', 'Building selected variant...');
     });
     installBtn.addEventListener('click', () => {
       if (!validateFields(['module', 'device', 'variant'], true)) return;
+      registerRecentAction('install');
       setBusy(true);
       vscode.postMessage({
         type: 'install',
@@ -1475,6 +1624,7 @@ export class RunPanel {
     });
     runBtn.addEventListener('click', () => {
       if (!validateFields(['module', 'device', 'variant'], true)) return;
+      registerRecentAction('run-now');
       setBusy(true);
       vscode.postMessage({
         type: 'run',
@@ -1488,6 +1638,7 @@ export class RunPanel {
     });
     runNowBtn.addEventListener('click', () => {
       if (!validateFields(['module', 'device', 'variant'], true)) return;
+      registerRecentAction('run-now');
       setBusy(true);
       vscode.postMessage({
         type: 'run',
@@ -1501,16 +1652,19 @@ export class RunPanel {
     });
     stopBtn.addEventListener('click', () => {
       if (!validateFields(['module', 'device'], true)) return;
+      registerRecentAction('stop');
       setBusy(true);
       vscode.postMessage({ type: 'stop', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
       setStatusState('running', 'Stopping app...');
     });
     cleanBtn.addEventListener('click', () => {
+      registerRecentAction('clean');
       setBusy(true);
       vscode.postMessage({ type: 'clean' });
       setStatusState('running', 'Cleaning project...');
     });
     releaseGateBtn.addEventListener('click', () => {
+      registerRecentAction('release-gate');
       setBusy(true);
       vscode.postMessage({ type: 'releaseQualityGate' });
       setStatusState('running', 'Running release quality gate...');
@@ -1523,6 +1677,7 @@ export class RunPanel {
 
     rerunBtn.addEventListener('click', () => {
       if (!selectedHistoryId) return;
+      registerRecentAction('rerun');
       setBusy(true);
       vscode.postMessage({ type: 'rerunHistory', historyId: selectedHistoryId });
       setStatusState('running', 'Re-running selected history item...');
@@ -1555,7 +1710,19 @@ export class RunPanel {
       vscode.postMessage({ type: 'quickAction', actionId: 'health-wizard', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
       setStatusState('running', 'Opening health wizard...');
     });
+    qaProjectDoctorBtn.addEventListener('click', () => {
+      registerRecentAction('project-doctor');
+      setBusy(true);
+      vscode.postMessage({ type: 'quickAction', actionId: 'project-doctor', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
+      setStatusState('running', 'Running project doctor...');
+    });
+    qaCrashAnrTriageBtn.addEventListener('click', () => {
+      setBusy(true);
+      vscode.postMessage({ type: 'quickAction', actionId: 'crash-anr-triage', moduleName: moduleSelect.value, deviceId: deviceSelect.value });
+      setStatusState('running', 'Opening crash/ANR triage...');
+    });
     qaReleaseGateBtn.addEventListener('click', () => {
+      registerRecentAction('release-gate');
       setBusy(true);
       vscode.postMessage({ type: 'releaseQualityGate' });
       setStatusState('running', 'Running release quality gate...');
@@ -1568,17 +1735,20 @@ export class RunPanel {
       persistPanelState();
       clearInlineValidation();
       updateActionButtons();
+      requestHealth();
     });
     deviceSelect.addEventListener('change', () => {
       persistPanelState();
       clearInlineValidation();
       updateActionButtons();
+      requestHealth();
     });
     variantSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setVariant', moduleName: moduleSelect.value, variant: variantSelect.value });
       persistPanelState();
       clearInlineValidation();
       updateBuildButtonLabel();
+      requestHealth();
     });
     flavorSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'setFlavor', moduleName: moduleSelect.value, flavor: flavorSelect.value });
@@ -1719,6 +1889,35 @@ export class RunPanel {
         [shortcuts.releaseGate, triggerReleaseGate],
         [shortcuts.refresh, triggerRefresh],
       ];
+
+      if (compareCombo(normalized, 'Alt+M')) {
+        e.preventDefault();
+        moduleSelect.focus();
+        return;
+      }
+      if (compareCombo(normalized, 'Alt+D')) {
+        e.preventDefault();
+        deviceSelect.focus();
+        return;
+      }
+      if (compareCombo(normalized, 'Alt+V')) {
+        e.preventDefault();
+        variantSelect.focus();
+        return;
+      }
+      if (compareCombo(normalized, 'Alt+R')) {
+        e.preventDefault();
+        registerRecentAction('rerun');
+        triggerRerun();
+        return;
+      }
+      if (compareCombo(normalized, 'Alt+A')) {
+        e.preventDefault();
+        registerRecentAction('align-policy');
+        runActionById('align-policy');
+        return;
+      }
+
       for (const [combo, handler] of handlers) {
         if (compareCombo(normalized, combo)) {
           e.preventDefault();
@@ -1927,10 +2126,13 @@ export class RunPanel {
     setLoadingState();
     vscode.postMessage({ type: 'refresh' });
     vscode.postMessage({ type: 'getTimeline' });
+    requestHealth();
     updateBuildButtonLabel();
     updateActionButtons();
     clearInlineValidation();
     renderPinnedPresets();
+    renderRecentActions();
+    renderTeamActions();
     applyShortcutHints();
     showErrorBox('', [], null);
   </script>

@@ -46,12 +46,26 @@ XML live edit with preview feedback:
 - `Android: Open Last Failed Step`
 - `Android: Export Diagnostics Bundle`
 
-## What Is New (0.2.4 Draft)
-- Resource Refactor Tools: bulk rename/move with automatic reference updates.
-- Device Farm Presets: built-in QA/Release/Smoke and custom preset runs.
-- API Compatibility Scanner: minSdk/targetSdk mismatch checks with guided report.
-- Project Blueprint Templates: MVVM/Clean/Multi-module structure generators.
-- Error UX polish: `Copy Fix Command`, `Copy Error Context`, and quieter low-signal success toasts in quiet mode.
+## What Is New (0.2.5)
+- AI Intelligence Hub introduced as a single actionable surface for release readiness, crash triage, matrix guidance, policy enforcement, deep-link validation, and observability correlation.
+- AI Crash Triage Hub now clusters likely root causes (mapping/proguard, NPE, resource, ABI/native), provides confidence scores, and links one-click suggested fixes.
+- Smart Device Test Matrix now recommends device coverage from minSdk/targetSdk/ABI/features and supports smart smoke retries plus PR heatmap export.
+- Release Risk Score now gates release decisions with weighted signals and supports audited override approval.
+- Startup Performance Guard now adds regression attribution and suggested init deferral plan in the intelligence report.
+- Policy-as-Code support now validates local manifest/gradle/signing rules from JSON/YAML and applies safe auto-fixes.
+- Deep Link Fuzz + Contract Validator now generates cases from nav graph + manifest and supports replay on selected devices.
+- APK Diff Intelligence now explains likely size-change drivers (dex/native/resources) with concrete optimization hints.
+- Team Playbooks and PR Quality Assistant added for consistent incident response and focused changed-file checks.
+
+### New Commands in 0.2.5
+- `Android: Open AI Intelligence Hub`
+- `Android: Run Smart Matrix Smoke`
+- `Android: Export PR Heatmap Comment`
+- `Android: Approve Release Risk Override`
+- `Android: Enforce Policy-as-Code`
+- `Android: Replay Deep Link Fuzz Case`
+- `Android: Run Team Incident Playbook`
+- `Android: Run Focused PR Checks`
 
 Marketplace and Support
 - Install from VS Code Marketplace (search: `Android Tools for VS Code`).
@@ -722,4 +736,4 @@ Manual feedback loop (no telemetry):
 - Changelog: `CHANGELOG.md`
 - Release notes template: `RELEASE_NOTES_TEMPLATE.md`
 - UI release QA checklist: `docs/UI_RELEASE_QA.md`
-- Top failure triage map: `docs/TOP_10_CRASH_FIXES.md`
+- Top failure triage map: `docs/TOP_10_CRASH_FIXES.md read me`

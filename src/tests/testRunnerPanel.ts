@@ -14,6 +14,20 @@ interface TestCase {
   message?: string;
 }
 
+interface MatrixFailureCluster {
+  signature: string;
+  count: number;
+}
+
+interface MatrixResultRow {
+  deviceId: string;
+  ok: boolean;
+  output: string;
+  attempts: number;
+  flakyRecovered: boolean;
+  clusters: MatrixFailureCluster[];
+}
+
 export class TestRunnerPanel {
   public static currentPanel: TestRunnerPanel | undefined;
   private static readonly viewType = 'androidTestRunnerPanel';
@@ -69,13 +83,20 @@ export class TestRunnerPanel {
         const variant = String(message.variant || 'Debug');
         this.lastVariant = variant;
         const runner = String(message.runner || '');
+        const profileName = String(message.profileName || '');
+        const retryPolicy = Math.max(0, Math.min(5, Number(message.retryPolicy ?? 1) || 0));
         if (!runner) {
           this.postMessage({ type: 'status', text: 'Instrumentation runner is required' });
           return;
         }
         const selectedIds = Array.isArray(message.devices) ? message.devices.map(String) : [];
-        const results = await this.runInstrumentationMatrix(selectedIds, runner);
+        const results = await this.runInstrumentationMatrix(selectedIds, runner, profileName || undefined, retryPolicy);
         this.postMessage({ type: 'matrixResults', rows: results });
+        break;
+      }
+      case 'loadProfiles': {
+        const profiles = await vscode.commands.executeCommand<Array<{ id: string; name: string; updatedAt?: number }>>('android-toolkit.listDeviceStateProfiles');
+        this.postMessage({ type: 'profiles', profiles: profiles || [] });
         break;
       }
       case 'loadDevices': {
@@ -157,17 +178,84 @@ export class TestRunnerPanel {
     return grouped;
   }
 
-  private async runInstrumentationMatrix(deviceIds: string[], runner: string): Promise<Array<{ deviceId: string; ok: boolean; output: string }>> {
+  private clusterFailureSignatures(output: string): MatrixFailureCluster[] {
+    const map = new Map<string, number>();
+    const lines = output.split('\n');
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
+      }
+      const signature =
+        line.match(/(?:AssertionError|ComparisonFailure|NoSuchElementException|NullPointerException|TimeoutException|IllegalStateException|IllegalArgumentException|RuntimeException)\b/)?.[0]
+        || line.match(/java\.[A-Za-z0-9_.]+Exception/)?.[0]
+        || line.match(/at\s+([A-Za-z0-9_$.]+\.[A-Za-z0-9_$<>]+)\(/)?.[1]
+        || line.match(/INSTRUMENTATION_RESULT:\s*shortMsg=(.+)$/)?.[1]
+        || line.match(/Process crashed\./)?.[0]
+        || undefined;
+      if (!signature) {
+        continue;
+      }
+      const next = (map.get(signature) || 0) + 1;
+      map.set(signature, next);
+    }
+    return Array.from(map.entries())
+      .map(([signature, count]) => ({ signature, count }))
+      .sort((a, b) => b.count - a.count || a.signature.localeCompare(b.signature))
+      .slice(0, 4);
+  }
+
+  private async runInstrumentationMatrix(
+    deviceIds: string[],
+    runner: string,
+    profileName?: string,
+    retryPolicy = 0
+  ): Promise<MatrixResultRow[]> {
     const sdk = detectSdk();
-    const rows: Array<{ deviceId: string; ok: boolean; output: string }> = [];
+    const rows: MatrixResultRow[] = [];
     await Promise.all(deviceIds.map(async (deviceId) => {
-      const result = await execCommand(sdk.adb, [
-        '-s', deviceId, 'shell', 'am', 'instrument', '-w', runner
-      ], { timeout: 600_000 });
+      if (profileName) {
+        await vscode.commands.executeCommand('android-toolkit.applyDeviceStateProfileByName', {
+          profileName,
+          deviceId,
+          moduleName: this.moduleName,
+        });
+      }
+      let ok = false;
+      let output = '';
+      let attempts = 0;
+      const clusterMap = new Map<string, number>();
+      const maxAttempts = Math.max(1, retryPolicy + 1);
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        attempts = attempt;
+        const result = await execCommand(sdk.adb, [
+          '-s', deviceId, 'shell', 'am', 'instrument', '-w', runner
+        ], { timeout: 600_000 });
+        const raw = result.stdout || result.stderr || '';
+        output = raw.split('\n').slice(-25).join('\n');
+        ok = result.exitCode === 0 && !raw.includes('FAILURES');
+        if (!ok) {
+          const clusters = this.clusterFailureSignatures(raw);
+          for (const row of clusters) {
+            clusterMap.set(row.signature, (clusterMap.get(row.signature) || 0) + row.count);
+          }
+        }
+        if (ok) {
+          break;
+        }
+      }
+
+      const clusters = Array.from(clusterMap.entries())
+        .map(([signature, count]) => ({ signature, count }))
+        .sort((a, b) => b.count - a.count || a.signature.localeCompare(b.signature))
+        .slice(0, 4);
       rows.push({
         deviceId,
-        ok: result.exitCode === 0 && !result.stdout.includes('FAILURES'),
-        output: (result.stdout || result.stderr).split('\n').slice(-20).join('\n'),
+        ok,
+        output,
+        attempts,
+        flakyRecovered: ok && attempts > 1,
+        clusters,
       });
     }));
     return rows;
@@ -215,6 +303,9 @@ export class TestRunnerPanel {
   </div>
   <div class="row">
     <input id="runnerInput" placeholder="Instrumentation runner (e.g. com.example.test/androidx.test.runner.AndroidJUnitRunner)" style="flex:1;" />
+    <input id="retryInput" type="number" min="0" max="5" value="1" title="Retry count for failed tests" style="width:90px;" />
+    <select id="profileSelect" style="min-width:200px;"><option value="">No state profile</option></select>
+    <button id="loadProfilesBtn">Load Profiles</button>
     <button id="loadDevicesBtn">Load Devices</button>
     <button id="runMatrixBtn">Run Matrix</button>
   </div>
@@ -237,13 +328,19 @@ export class TestRunnerPanel {
     document.getElementById('loadDevicesBtn').addEventListener('click', () => {
       vscode.postMessage({ type: 'loadDevices' });
     });
+    document.getElementById('loadProfilesBtn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'loadProfiles' });
+    });
     document.getElementById('runMatrixBtn').addEventListener('click', () => {
       const checks = Array.from(document.querySelectorAll('input[name="dev"]')).filter(n => n.checked).map(n => n.value);
+      const profileName = document.getElementById('profileSelect').value;
       vscode.postMessage({
         type: 'runInstrumentationMatrix',
         variant: document.getElementById('variant').value,
         runner: document.getElementById('runnerInput').value.trim(),
-        devices: checks
+        devices: checks,
+        profileName,
+        retryPolicy: Number(document.getElementById('retryInput').value || 0)
       });
       status.textContent = 'Running instrumentation matrix...';
     });
@@ -280,15 +377,48 @@ export class TestRunnerPanel {
           devicesRow.appendChild(wrap);
         });
       }
+      if (msg.type === 'profiles') {
+        const sel = document.getElementById('profileSelect');
+        const prev = sel.value;
+        sel.innerHTML = '';
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = 'No state profile';
+        sel.appendChild(noneOpt);
+        (msg.profiles || []).forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.name;
+          opt.textContent = p.name;
+          sel.appendChild(opt);
+        });
+        if (prev) {
+          sel.value = prev;
+        }
+      }
       if (msg.type === 'matrixResults') {
-        status.textContent = 'Matrix done';
-        const lines = (msg.rows || []).map(r => (r.ok ? '[OK] ' : '[FAIL] ') + r.deviceId + '\\n' + r.output);
-        tree.textContent = lines.join('\\n\\n');
+        const rows = msg.rows || [];
+        const passed = rows.filter(r => r.ok).length;
+        const failed = rows.filter(r => !r.ok).length;
+        const flakyRecovered = rows.filter(r => r.flakyRecovered).length;
+        status.textContent = 'Matrix done. Pass: ' + passed + ' Fail: ' + failed + ' Flaky recovered: ' + flakyRecovered;
+        const lines = [];
+        lines.push('Matrix Dashboard');
+        lines.push('Pass: ' + passed + '  Fail: ' + failed + '  Flaky recovered: ' + flakyRecovered);
+        lines.push('');
+        rows.forEach(r => {
+          const topCluster = (r.clusters || []).slice(0, 2).map(c => c.signature + ' x' + c.count).join(' | ');
+          lines.push((r.ok ? '[OK] ' : '[FAIL] ') + r.deviceId + ' attempts=' + r.attempts + (r.flakyRecovered ? ' (recovered on retry)' : ''));
+          lines.push('Top clusters: ' + (topCluster || 'n/a'));
+          lines.push(r.output || '');
+          lines.push('');
+        });
+        tree.textContent = lines.join('\n');
       }
       if (msg.type === 'status') {
         status.textContent = msg.text;
       }
     });
+    vscode.postMessage({ type: 'loadProfiles' });
   </script>
 </body>
 </html>`;

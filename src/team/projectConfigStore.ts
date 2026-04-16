@@ -15,6 +15,19 @@ export interface ProjectConfigV2 {
     allowedVariants?: string[];
     enforceModule?: string;
   };
+  teamProfile?: {
+    preferredJdkPath?: string;
+    runRules?: Array<{
+      moduleName: string;
+      defaultDeviceId?: string;
+      defaultVariant?: string;
+      preRunPipeline?: { clean: boolean; assemble: boolean; install: boolean; run: boolean };
+    }>;
+    performanceBudgets?: {
+      activationBudgetMs?: number;
+      commandLatencySloMs?: Record<string, number>;
+    };
+  };
   launchProfiles?: LaunchProfile[];
   matrixPresets?: Array<{ name: string; deviceIds: string[] }>;
   logcatPresets?: Array<{ name: string; filter: { packageName: string; tag: string; level: string } }>;
@@ -74,6 +87,7 @@ function migrateToV2(raw: unknown): { config: ProjectConfigV2; migrated: boolean
         ui: isObject(raw.ui) ? raw.ui : undefined,
         behavior: isObject(raw.behavior) ? raw.behavior : undefined,
         policy: isObject(raw.policy) ? raw.policy as ProjectConfigV2['policy'] : undefined,
+        teamProfile: isObject(raw.teamProfile) ? raw.teamProfile as ProjectConfigV2['teamProfile'] : undefined,
         launchProfiles: normalizeLaunchProfiles(raw.launchProfiles),
         matrixPresets: Array.isArray(raw.matrixPresets) ? raw.matrixPresets as ProjectConfigV2['matrixPresets'] : undefined,
         logcatPresets: Array.isArray(raw.logcatPresets) ? raw.logcatPresets as ProjectConfigV2['logcatPresets'] : undefined,
@@ -94,6 +108,7 @@ function migrateToV2(raw: unknown): { config: ProjectConfigV2; migrated: boolean
         ui: isObject(raw.ui) ? raw.ui : undefined,
         behavior: isObject(raw.behavior) ? raw.behavior : undefined,
         policy: isObject(raw.policy) ? raw.policy as ProjectConfigV2['policy'] : undefined,
+        teamProfile: isObject(raw.teamProfile) ? raw.teamProfile as ProjectConfigV2['teamProfile'] : undefined,
         launchProfiles: normalizeLaunchProfiles(raw.launchProfiles),
         matrixPresets: Array.isArray(raw.matrixPresets) ? raw.matrixPresets as ProjectConfigV2['matrixPresets'] : undefined,
         logcatPresets: Array.isArray(raw.logcatPresets) ? raw.logcatPresets as ProjectConfigV2['logcatPresets'] : undefined,

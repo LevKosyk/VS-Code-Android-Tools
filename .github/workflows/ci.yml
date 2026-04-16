@@ -54,6 +54,9 @@ jobs:
         if: runner.os == 'macOS'
         run: npm run -s test:runtime
 
+      - name: CI perf delta gate (activation + first command)
+        run: npm run -s test:ci-perf-gate
+
       - name: Perf budget
         run: node --test test/perf-budget.test.js
 
@@ -66,6 +69,14 @@ jobs:
         with:
           name: runtime-flaky-report-${{ matrix.os }}
           path: .artifacts/runtime-flaky-report.json
+          if-no-files-found: warn
+
+      - name: Upload CI perf snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-perf-snapshot-${{ matrix.os }}
+          path: .artifacts/ci-perf-snapshot.json
           if-no-files-found: warn
 
       - name: Upload VSIX artifact
