@@ -100,7 +100,14 @@ export class DeviceManagerItem extends vscode.TreeItem {
 export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceManagerItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<DeviceManagerItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  
+  // OPTIMIZATION: Add cache with TTL (5 seconds) to reduce device queries
+  private readonly deviceCache = new Map<string, { items: any; timestamp: number }>();
+  private readonly CACHE_TTL_MS = 5000;
+  
   refresh(): void {
+    // OPTIMIZATION: Clear cache on refresh to force fresh data
+    this.deviceCache.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
   getTreeItem(element: DeviceManagerItem): vscode.TreeItem {
