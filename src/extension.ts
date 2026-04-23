@@ -6313,7 +6313,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const MAX_SESSION_HISTORY = 50;
   const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
   const persistedSessions = context.globalState.get<SessionRecord[]>(SESSION_HISTORY_KEY, [])
-    .filter(s => Date.now() - s.timestamp < SESSION_MAX_AGE_MS)
+    .filter(s => Date.now() - s.startedAt < SESSION_MAX_AGE_MS)
     .slice(0, MAX_SESSION_HISTORY);
   if (persistedSessions.length > 0) {
     sessionHistory.splice(0, sessionHistory.length, ...persistedSessions);
