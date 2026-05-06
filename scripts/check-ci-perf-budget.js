@@ -3,7 +3,7 @@ const path = require('node:path');
 
 function normalizeOsKey(value) {
   const text = String(value || '').toLowerCase();
-  if (text.includes('mac')) {
+  if (text.includes('mac') || text.includes('darwin')) {
     return 'macos';
   }
   if (text.includes('linux')) {
@@ -45,8 +45,8 @@ function evaluateCiPerfBudget(snapshot, baselineConfig, osKey) {
 
   const failures = [];
   const rows = checks.map((row) => {
-    if (!Number.isFinite(row.current) || row.current <= 0) {
-      failures.push(`${row.key} missing or non-positive in snapshot`);
+    if (!Number.isFinite(row.current) || row.current < 0) {
+      failures.push(`${row.key} missing or non-finite in snapshot`);
       return { ...row, allowed: 0, status: 'FAIL' };
     }
     if (!Number.isFinite(row.baseline) || row.baseline <= 0) {

@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: Se
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-06
+### Fixed
+- Treat `firstCommandLatencyMs` === 0 as a valid measurement in CI perf snapshot checks to avoid false failures of the perf gate.
+- Correct OS normalization for `darwin` so it maps to `macos` (prevents accidental mapping to `windows`).
+
+### Testing
+- Verified local run of `node scripts/check-ci-perf-budget.js` with representative snapshot; CI perf gate now accepts zero latency and reports pass when appropriate.
+
+
 ## [0.2.6] - 2026-04-23
 ### Added
 - **Monthly Rating Prompt**: Extension now asks users to rate it once per month until they provide a rating
