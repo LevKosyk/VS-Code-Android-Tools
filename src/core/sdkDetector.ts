@@ -104,14 +104,11 @@ function validateSdk(sdkRoot: string): SdkPaths | null {
     return null;
   }
   const emulator = findExecutable(sdkRoot, 'emulator', 'emulator');
-  if (!emulator) {
-    return null;
-  }
   const avdmanager = findAvdManager(sdkRoot);
   return {
     root: sdkRoot,
     adb,
-    emulator,
+    emulator: emulator || '',
     avdmanager: avdmanager || '',
   };
 }

@@ -3,23 +3,25 @@ import { execCommand, execCommandLines } from '../core/cli';
 import { detectSdk } from '../core/sdkDetector';
 import { DebuggableProcess, DebugConfig } from './types';
 const DEFAULT_JDWP_PORT = 8700;
+export function parseJdwpPids(output: string): number[] {
+  return output.split(/\r?\n/).map(value => Number(value.trim())).filter(value => Number.isInteger(value) && value > 0);
+}
+export function parseProcessName(output: string): string | undefined {
+  return output.split('\0')[0]?.trim() || output.trim().split(/\s+/)[0] || undefined;
+}
 export async function listDebuggableProcesses(deviceId: string): Promise<DebuggableProcess[]> {
   const sdk = detectSdk();
   try {
     const result = await execCommand(sdk.adb, ['-s', deviceId, 'jdwp']);
-    const pids = result.stdout.split('\n').filter(p => p.trim()).map(p => parseInt(p.trim(), 10));
+    const pids = parseJdwpPids(result.stdout);
     if (pids.length === 0) {
       return [];
     }
     const processes: DebuggableProcess[] = [];
     for (const pid of pids) {
-      const psResult = await execCommand(sdk.adb, [
-        '-s', deviceId, 'shell', 
-        `cat /proc/${pid}/cmdline 2>/dev/null | tr '\\0' ' '`
-      ]);
+      const psResult = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'cat', `/proc/${pid}/cmdline`]);
       if (psResult.exitCode === 0 && psResult.stdout.trim()) {
-        const cmdline = psResult.stdout.trim();
-        const packageName = cmdline.split(' ')[0] || `pid:${pid}`;
+        const packageName = parseProcessName(psResult.stdout) || `pid:${pid}`;
         processes.push({
           pid,
           packageName,
@@ -84,6 +86,7 @@ export async function verifyJdwpConnection(port: number): Promise<boolean> {
   });
 }
 export async function findAvailablePort(startPort: number = DEFAULT_JDWP_PORT): Promise<number> {
+  if (startPort > 65535) throw new Error('No available local port for JDWP forwarding.');
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.on('error', () => {
@@ -98,12 +101,9 @@ export async function findAvailablePort(startPort: number = DEFAULT_JDWP_PORT): 
 export async function getPackageForPid(deviceId: string, pid: number): Promise<string | undefined> {
   const sdk = detectSdk();
   try {
-    const result = await execCommand(sdk.adb, [
-      '-s', deviceId, 'shell',
-      `cat /proc/${pid}/cmdline | tr '\\0' '\\n' | head -1`
-    ]);
+    const result = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'cat', `/proc/${pid}/cmdline`]);
     if (result.exitCode === 0) {
-      return result.stdout.trim() || undefined;
+      return parseProcessName(result.stdout);
     }
   } catch {
   }
@@ -112,11 +112,8 @@ export async function getPackageForPid(deviceId: string, pid: number): Promise<s
 export async function isAppDebuggable(deviceId: string, packageName: string): Promise<boolean> {
   const sdk = detectSdk();
   try {
-    const result = await execCommand(sdk.adb, [
-      '-s', deviceId, 'shell',
-      `run-as ${packageName} id 2>/dev/null && echo DEBUGGABLE`
-    ]);
-    return result.stdout.includes('DEBUGGABLE');
+    const result = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'run-as', packageName, 'id']);
+    return result.exitCode === 0 && /uid=/.test(result.stdout);
   } catch {
     return false;
   }

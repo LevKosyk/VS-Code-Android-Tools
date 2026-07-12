@@ -27,9 +27,6 @@ async function runRuntimeSmoke() {
   const critical = [
     'android-toolkit.openRunPanel',
     'android-toolkit.selectDevice',
-    'android-toolkit.openMatrixDashboard',
-    'android-toolkit.exportTeamConfig',
-    'android-toolkit.importTeamConfig',
     'android-toolkit.ciSmoke',
     'android-toolkit.cancelActiveOperation',
     'android-toolkit.collectDiagnosticsSnapshot',
@@ -37,20 +34,20 @@ async function runRuntimeSmoke() {
     'android-toolkit.runSelectedAlias',
     'android-toolkit.stopSelectedAlias',
     'android-toolkit.logcatThisApp',
-    'android-toolkit.openXmlLivePreview',
-    'android-toolkit.toggleXmlLivePreview',
-    'android-toolkit.generateConstraintSetSnippet',
     'android-toolkit.showGradleOutput',
     'android-toolkit.openLogcat',
     'android-toolkit.openCrashSymbolicator',
     'android-toolkit.openDeepLinkStudio',
-    'android-toolkit.openAdbMacroRecorder',
-    'android-toolkit.openSnapshotScenarioRunner',
-    'android-toolkit.projectBlueprintTemplates',
-    'android-toolkit.resourceRefactorTools',
-    'android-toolkit.scanApiCompatibility',
-    'android-toolkit.runDeviceFarmPreset',
-    'android-toolkit.configureDeviceFarmPresets',
+    'android-toolkit.openDeviceCenter',
+    'android-toolkit.pairWirelessDevice',
+    'android-toolkit.connectWirelessDevice',
+    'android-toolkit.disconnectWirelessDevice',
+    'android-toolkit.mirrorDeviceScrcpy',
+    'android-toolkit.clearAppData',
+    'android-toolkit.projectHealth',
+    'android-toolkit.gradleDoctor',
+    'android-toolkit.installApk',
+    'android-toolkit.analyzeApk',
     'android-toolkit.openLastFailedStep',
     'android-toolkit.exportDiagnosticsBundle',
   ];
@@ -65,8 +62,6 @@ async function runRuntimeSmoke() {
   await executeNoThrow('android-toolkit.showGradleOutput');
   await executeNoThrow('android-toolkit.openCrashSymbolicator');
   await executeNoThrow('android-toolkit.openDeepLinkStudio');
-  await executeNoThrow('android-toolkit.openAdbMacroRecorder');
-  await executeNoThrow('android-toolkit.openSnapshotScenarioRunner');
   await executeNoThrow('android-toolkit.ciSmoke');
 }
 

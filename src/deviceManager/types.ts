@@ -1,4 +1,4 @@
-export type Platform = 'android' | 'ios';
+export type Platform = 'android';
 export type DeviceState = 'running' | 'stopped' | 'unknown';
 export interface UnifiedDevice {
   id: string;
@@ -8,6 +8,7 @@ export interface UnifiedDevice {
   deviceType: string;
   osVersion: string;
   platformId: string;
+  kind: 'emulator' | 'physical';
 }
 export type DeviceNodeType = 
   | 'platform'      

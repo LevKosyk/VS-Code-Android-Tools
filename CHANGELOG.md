@@ -5,6 +5,68 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: Se
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-12
+
+### Added
+- Unified Device Center entry point with device input, clipboard, app-data, wireless, and mirroring workflows.
+- Wireless debugging commands for validated `adb pair`, `adb connect`, and `adb disconnect` endpoints, including IPv4, hostname, and bracketed IPv6 support.
+- Optional scrcpy discovery and per-device mirroring with configurable executable path.
+- Explicit Run Pipeline state machine with ordered, terminal, failure, and cancellation states.
+- Gradle Model Helper combining application modules, application IDs, build types, product flavors, and variants.
+- AGP `output-metadata.json` APK resolution with preference for universal artifacts over ABI splits.
+- Ordered ADB offline recovery: server restart, device reconnect, and online wait.
+- Integration coverage for wireless endpoints, offline recovery, flavored multi-module models, APK metadata, and pipeline state transitions.
+
+### Changed
+- Strengthened JDWP process discovery by removing shell pipelines, filtering invalid PIDs, parsing null-delimited process names, and bounding port discovery.
+- Expanded the focused Command Palette to 41 commands to expose Device Center, wireless debugging, scrcpy, and clear-app-data workflows.
+- Continued lifecycle-aware app PID tracking and crash navigation in Logcat 2.0.
+
+### Fixed
+- Physical-device actions no longer depend on a running emulator.
+- APK selection no longer relies only on recursive modification time when AGP metadata is available.
+- ADB recovery now fails explicitly at the owning server, reconnect, or wait stage.
+
+## [1.0.0] - 2026-07-12
+
+### Highlights
+- Rebuilt Android Tools around the focused workflow: environment check, device selection, build, install, launch verification, and Logcat.
+- Reduced the default Command Palette from 191 entries to 35 primary workflows while preserving contextual actions inside their owning views.
+- Added a release-grade Run Pipeline with explicit `preflight`, `build`, `install`, `launch`, and `verify` stages.
+- Upgraded Logcat with application PID tracking, crash/ANR classification, and Kotlin/Java source navigation.
+
+### Added
+- Unified Android Device Manager for physical devices and AVDs.
+- Post-launch PID verification that detects applications which launch and immediately exit or crash.
+- Retry-based and lifecycle-aware PID tracking for app-only Logcat sessions.
+- Crash, ANR, stack-frame, and ordinary-message Logcat classification.
+- Direct source navigation from Logcat stack frames, including duplicate-filename selection.
+- Windows CI and VS Code runtime smoke coverage.
+- Manifest/runtime command contracts and focused Command Palette contracts.
+- Clean-build and clean-checkout VSIX packaging safeguards.
+- Privacy and security policies.
+
+### Changed
+- Scoped activation to Android workspaces and Android Tools views instead of every VS Code startup.
+- Renamed the local heuristic Intelligence surface to Android Diagnostics Hub and clarified that no AI service receives project data.
+- Added a central command registry that fails fast on duplicate command IDs.
+- Moved Android view composition into a dedicated activation module.
+- Made the Environment Doctor resilient when SDK, ADB, or Java are missing and report exact setup failures instead of crashing or marking an unknown JDK as healthy.
+- Allowed physical-device workflows with Platform Tools installed even when the optional Android Emulator package is absent.
+
+### Removed
+- Removed iOS Simulator support from the Android-focused Device Manager.
+- Removed the recurring monthly Marketplace rating prompt.
+- Removed global `onStartupFinished` activation.
+
+### Security
+- Added explicit privacy and security policies.
+- Kept diagnostics, project metadata, device identifiers, and logs local unless the user explicitly exports and shares them.
+
+### Testing
+- Added unit coverage for PID parsing, SDK detection without Emulator, Logcat classification, command contracts, activation scope, and pipeline stage ordering.
+- Validated compile, lint, 55 unit/smoke tests, 5 P0 workflow tests, release checks, and verified VSIX packaging; VS Code Extension Host smoke remains enforced in the cross-platform CI matrix.
+
 ## [0.2.7] - 2026-05-06
 ### Fixed
 - Treat `firstCommandLatencyMs` === 0 as a valid measurement in CI perf snapshot checks to avoid false failures of the perf gate.

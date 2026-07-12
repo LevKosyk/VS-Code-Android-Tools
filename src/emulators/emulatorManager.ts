@@ -6,6 +6,9 @@ import { Avd, AvdStatus } from './types';
 const runningEmulators = new Map<string, string>();
 export async function listAvds(): Promise<Avd[]> {
   const sdk = detectSdk();
+  if (!sdk.emulator) {
+    return [];
+  }
   const lines = await execCommandLines(sdk.emulator, ['-list-avds']);
   const devices = await listDevices();
   const runningDeviceIds = new Set(
@@ -55,6 +58,13 @@ export async function isAvdRunning(avdName: string): Promise<boolean> {
 }
 export async function startEmulator(avdName: string): Promise<string> {
   const sdk = detectSdk();
+  if (!sdk.emulator) {
+    throw new EmulatorError(
+      'Android Emulator is not installed',
+      'Android SDK was found, but the Emulator package is missing.',
+      'Install Android Emulator from SDK Manager or connect a physical device.'
+    );
+  }
   const avds = await listAvds();
   const avd = avds.find(a => a.name === avdName);
   if (!avd) {

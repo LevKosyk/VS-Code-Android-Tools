@@ -35,6 +35,7 @@ export interface LogEntry {
   tag: string;
   message: string;
   raw: string;
+  kind: 'normal' | 'crash' | 'anr' | 'stacktrace';
 }
 export interface LogFilter {
   minLevel: LogLevel;
@@ -61,6 +62,15 @@ export function parseLogLine(line: string, id: number): LogEntry | null {
     return null;
   }
   const [, timestamp, pid, tid, level, tag, message] = match;
+  const trimmedMessage = message.trim();
+  const kind: LogEntry['kind'] =
+    /ANR in |Input dispatching timed out|Broadcast of Intent.*timed out/i.test(trimmedMessage)
+      ? 'anr'
+      : /FATAL EXCEPTION|Process: .*PID:|Force finishing activity/i.test(trimmedMessage)
+        ? 'crash'
+        : /^(?:at\s+[\w.$]+\([^)]*:\d+\)|Caused by:|Suppressed:)/.test(trimmedMessage)
+          ? 'stacktrace'
+          : 'normal';
   return {
     id,
     timestamp,
@@ -70,6 +80,7 @@ export function parseLogLine(line: string, id: number): LogEntry | null {
     tag: tag.trim(),
     message,
     raw: line,
+    kind,
   };
 }
 export function matchesFilter(entry: LogEntry, filter: LogFilter): boolean {

@@ -8,12 +8,7 @@ import {
   DeviceAction 
 } from './types';
 import { listAvds } from '../emulators/emulatorManager';
-import { listRunningEmulators } from '../devices/deviceManager';
-import { 
-  isIOSAvailable, 
-  listSimulators, 
-  checkXcodeAvailable 
-} from '../ios/simulatorManager';
+import { listDevicesDetailed } from '../devices/deviceManager';
 export class DeviceManagerItem extends vscode.TreeItem {
   public readonly data: DeviceNodeData;
   constructor(
@@ -37,12 +32,15 @@ export class DeviceManagerItem extends vscode.TreeItem {
   private setIcon(): void {
     switch (this.data.type) {
       case 'platform':
-        this.iconPath = this.data.platform === 'android'
-          ? new vscode.ThemeIcon('device-mobile')
-          : new vscode.ThemeIcon('device-mobile');
+        this.iconPath = new vscode.ThemeIcon('device-mobile');
         break;
       case 'device':
-        if (this.data.device?.state === 'running') {
+        if (this.data.device?.kind === 'physical') {
+          this.iconPath = new vscode.ThemeIcon(
+            'device-mobile',
+            this.data.device.state === 'running' ? new vscode.ThemeColor('testing.iconPassed') : undefined
+          );
+        } else if (this.data.device?.state === 'running') {
           this.iconPath = new vscode.ThemeIcon('vm-running', new vscode.ThemeColor('testing.iconPassed'));
         } else {
           this.iconPath = new vscode.ThemeIcon('vm');
@@ -76,9 +74,7 @@ export class DeviceManagerItem extends vscode.TreeItem {
       const d = this.data.device;
       this.tooltip = `${d.name}\n${d.deviceType}\n${d.osVersion}\nStatus: ${d.state}`;
     } else if (this.data.type === 'platform') {
-      this.tooltip = this.data.platform === 'android' 
-        ? 'Android Emulators'
-        : 'iOS Simulators';
+      this.tooltip = 'Android Emulators';
     }
   }
   private setCommand(): void {
@@ -132,13 +128,6 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
       'Android',
       vscode.TreeItemCollapsibleState.Expanded
     ));
-    if (isIOSAvailable()) {
-      nodes.push(new DeviceManagerItem(
-        { type: 'platform', platform: 'ios' },
-        'iOS',
-        vscode.TreeItemCollapsibleState.Expanded
-      ));
-    }
     nodes.push(new DeviceManagerItem(
       { type: 'create' },
       'Create Device',
@@ -147,27 +136,40 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
     return nodes;
   }
   private async getDevicesForPlatform(platform: Platform): Promise<DeviceManagerItem[]> {
-    if (platform === 'android') {
-      return this.getAndroidDevices();
-    } else {
-      return this.getIOSDevices();
-    }
+    return this.getAndroidDevices();
   }
   private async getAndroidDevices(): Promise<DeviceManagerItem[]> {
     try {
       const avds = await listAvds();
-      const runningEmulators = await listRunningEmulators();
-      if (avds.length === 0) {
+      const connectedDevices = await listDevicesDetailed();
+      const physicalDevices = connectedDevices.filter(device => device.type === 'physical');
+      if (avds.length === 0 && physicalDevices.length === 0) {
         return [new DeviceManagerItem(
           { type: 'placeholder', message: 'No emulators found' },
           'No emulators. Create one to get started.',
           vscode.TreeItemCollapsibleState.None
         )];
       }
-      return avds.map(avd => {
-        const running = runningEmulators.find(e => 
-          e.id.includes(avd.name) || avd.deviceId === e.id
+      const physicalItems = physicalDevices.map(item => {
+        const online = item.status === 'online';
+        const device: UnifiedDevice = {
+          id: item.id,
+          name: item.model || item.id,
+          platform: 'android',
+          state: online ? 'running' : 'unknown',
+          deviceType: 'Physical Android Device',
+          osVersion: item.androidVersion ? `Android ${item.androidVersion}` : 'Android',
+          platformId: item.id,
+          kind: 'physical',
+        };
+        const suffix = online ? '' : ` (${item.status})`;
+        return new DeviceManagerItem(
+          { type: 'device', device },
+          `${device.name}${suffix}`,
+          vscode.TreeItemCollapsibleState.None
         );
+      });
+      const emulatorItems = avds.map(avd => {
         const device: UnifiedDevice = {
           id: avd.deviceId || avd.name,
           name: avd.name,
@@ -176,6 +178,7 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           deviceType: 'Android Virtual Device',
           osVersion: 'Android',
           platformId: avd.name,
+          kind: 'emulator',
         };
         return new DeviceManagerItem(
           { type: 'device', device },
@@ -183,6 +186,7 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
           vscode.TreeItemCollapsibleState.Collapsed
         );
       });
+      return [...physicalItems, ...emulatorItems];
     } catch (error) {
       return [new DeviceManagerItem(
         { type: 'placeholder', message: 'Error loading' },
@@ -191,52 +195,10 @@ export class DeviceManagerProvider implements vscode.TreeDataProvider<DeviceMana
       )];
     }
   }
-  private async getIOSDevices(): Promise<DeviceManagerItem[]> {
-    try {
-      const xcodeAvailable = await checkXcodeAvailable();
-      if (!xcodeAvailable) {
-        return [new DeviceManagerItem(
-          { type: 'placeholder', message: 'Xcode required' },
-          'Xcode Command Line Tools not found',
-          vscode.TreeItemCollapsibleState.None
-        )];
-      }
-      const simulators = await listSimulators();
-      const available = simulators
-        .filter(sim => sim.isAvailable)
-        .slice(0, 20);
-      if (available.length === 0) {
-        return [new DeviceManagerItem(
-          { type: 'placeholder', message: 'No simulators' },
-          'No iOS simulators found',
-          vscode.TreeItemCollapsibleState.None
-        )];
-      }
-      return available.map(sim => {
-        const device: UnifiedDevice = {
-          id: sim.udid,
-          name: sim.name,
-          platform: 'ios',
-          state: sim.state === 'Booted' ? 'running' : 'stopped',
-          deviceType: sim.deviceType,
-          osVersion: sim.runtime,
-          platformId: sim.udid,
-        };
-        return new DeviceManagerItem(
-          { type: 'device', device },
-          sim.name,
-          vscode.TreeItemCollapsibleState.Collapsed
-        );
-      });
-    } catch {
-      return [new DeviceManagerItem(
-        { type: 'placeholder', message: 'Error' },
-        'Failed to load iOS simulators',
-        vscode.TreeItemCollapsibleState.None
-      )];
-    }
-  }
   private getDeviceActions(device: UnifiedDevice): DeviceManagerItem[] {
+    if (device.kind === 'physical') {
+      return [];
+    }
     const actions: DeviceManagerItem[] = [];
     if (device.state === 'running') {
       actions.push(new DeviceManagerItem(

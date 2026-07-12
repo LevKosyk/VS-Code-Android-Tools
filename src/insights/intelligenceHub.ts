@@ -1086,12 +1086,12 @@ export function renderHeatmapComment(result: MatrixSmokeResult): string {
 
 export function renderIntelligenceHubMarkdown(snapshot: IntelligenceHubSnapshot): string {
   const lines: string[] = [];
-  lines.push('# AI Intelligence Hub');
+  lines.push('# Android Diagnostics Hub');
   lines.push('');
   lines.push(`Generated: ${snapshot.generatedAt}`);
   lines.push('');
 
-  lines.push('## AI Crash Triage Hub');
+  lines.push('## Crash Triage');
   lines.push('');
   lines.push('| Cluster | Count | Confidence | Suggested Fix | Probable File | Why |');
   lines.push('| --- | ---: | ---: | --- | --- | --- |');
