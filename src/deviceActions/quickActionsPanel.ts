@@ -32,7 +32,7 @@ export class QuickActionsPanel {
     }
     const panel = vscode.window.createWebviewPanel(
       QuickActionsPanel.viewType,
-      'Android Quick Actions',
+      'Android Device Center',
       column || vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -94,6 +94,21 @@ export class QuickActionsPanel {
           showError('Failed to read device clipboard.');
         }
         return;
+      case 'pairWireless':
+        await vscode.commands.executeCommand('android-toolkit.pairWirelessDevice');
+        return;
+      case 'connectWireless':
+        await vscode.commands.executeCommand('android-toolkit.connectWirelessDevice');
+        return;
+      case 'disconnectWireless':
+        await vscode.commands.executeCommand('android-toolkit.disconnectWirelessDevice');
+        return;
+      case 'mirror':
+        await vscode.commands.executeCommand('android-toolkit.mirrorDeviceScrcpy');
+        return;
+      case 'clearAppData':
+        await vscode.commands.executeCommand('android-toolkit.clearAppData');
+        return;
     }
   }
 
@@ -133,6 +148,17 @@ export class QuickActionsPanel {
   <div class="row">
     <select id="deviceSelect"></select>
     <button onclick="refresh()">Refresh</button>
+  </div>
+
+  <div class="section">
+    <h3>Connection and app</h3>
+    <div class="grid">
+      <button onclick="command('pairWireless')">Pair wireless</button>
+      <button onclick="command('connectWireless')">Connect wireless</button>
+      <button onclick="command('disconnectWireless')">Disconnect wireless</button>
+      <button onclick="command('mirror')">Mirror with scrcpy</button>
+      <button onclick="command('clearAppData')">Clear app data</button>
+    </div>
   </div>
 
   <div class="section">
@@ -210,6 +236,9 @@ export class QuickActionsPanel {
     }
     function pullClipboard() {
       vscode.postMessage({ type: 'pullClipboard' });
+    }
+    function command(type) {
+      vscode.postMessage({ type });
     }
     deviceSelect.addEventListener('change', () => {
       vscode.postMessage({ type: 'selectDevice', deviceId: deviceSelect.value });

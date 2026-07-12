@@ -8,11 +8,11 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
-!out/**
 node_modules/**
 **/*.test.ts
 **/*.spec.ts
 .github/**
+.ci/**
 test/**
 docs/**
 qa/**

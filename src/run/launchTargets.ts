@@ -123,6 +123,18 @@ export function listManifestLaunchTargets(workspaceRoot: string, moduleName: str
       seen.add(deepId);
     }
   }
+  const aliasRegex = /<activity-alias\b([\s\S]*?)(?:\/>|>([\s\S]*?)<\/activity-alias>)/gi;
+  let aliasMatch: RegExpExecArray | null;
+  while ((aliasMatch = aliasRegex.exec(manifest)) !== null) {
+    const attrs = aliasMatch[1] || '';
+    const rawName = attr(attrs, 'android:name');
+    if (!rawName) continue;
+    const aliasName = pkg ? resolveActivityName(pkg, rawName) : rawName;
+    const id = `activity:${aliasName}`;
+    if (!seen.has(id)) {
+      targets.push({ id, label: `Activity Alias: ${aliasName}`, type: 'activity', activity: aliasName });
+      seen.add(id);
+    }
+  }
   return targets;
 }
-

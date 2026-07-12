@@ -3,10 +3,9 @@ import { LogcatStream, logcatManager } from './logcatStream';
 import { LogEntry, LogFilter, LogLevel, LOG_LEVEL_NAMES, DEFAULT_FILTER } from './types';
 import { listDevices } from '../devices/deviceManager';
 import { showError, showInfo } from '../ui/notifications';
-import { detectSdk } from '../core/sdkDetector';
-import { execCommand } from '../core/cli';
 import { findApplicationId, findApplicationModules } from '../core/androidProject';
 import { getWebviewThemeStyle } from '../ui/webviewTheme';
+import { waitForAppPid } from '../run/appProcess';
 export class LogcatPanel {
   public static currentPanel: LogcatPanel | undefined;
   private static readonly viewType = 'androidLogcat';
@@ -19,6 +18,7 @@ export class LogcatPanel {
   private pendingEntries: object[] = [];
   private flushTimer: NodeJS.Timeout | undefined;
   private devicePollTimer: NodeJS.Timeout | undefined;
+  private pidRefreshTimer: NodeJS.Timeout | undefined;
   private activeDeviceId: string | undefined;
   private resumeStreamOnVisible = false;
   private readonly flushIntervalMs = 120;
@@ -90,6 +90,9 @@ export class LogcatPanel {
         case 'copyLine':
           await vscode.env.clipboard.writeText(String(message.text || ''));
           showInfo('Log line copied to clipboard.');
+          break;
+        case 'openSource':
+          await this.openStackSource(String(message.file || ''), Number(message.line));
           break;
         case 'getPresets':
           this.sendPresets();
@@ -253,15 +256,13 @@ export class LogcatPanel {
       this.postMessage({ type: 'error', message: 'Cannot resolve applicationId.' });
       return;
     }
-    const sdk = detectSdk();
-    const pidResult = await execCommand(sdk.adb, ['-s', deviceId, 'shell', 'pidof', packageName], { timeout: 5000 });
-    const pid = parseInt((pidResult.stdout || '').trim().split(/\s+/)[0], 10);
-    if (!Number.isFinite(pid)) {
-      this.postMessage({ type: 'error', message: `App is not running: ${packageName}` });
+    const process = await waitForAppPid(deviceId, packageName);
+    if (!process.pid) {
+      this.postMessage({ type: 'error', message: process.error || `App is not running: ${packageName}` });
       return;
     }
-    this.setFilter({ ...this.filter, packageName, pid });
-    this.postMessage({ type: 'onlyThisAppApplied', packageName, pid });
+    this.setFilter({ ...this.filter, packageName, pid: process.pid });
+    this.postMessage({ type: 'onlyThisAppApplied', packageName, pid: process.pid });
   }
   private async exportLogs(entries: string[] | undefined, onlySelected: boolean): Promise<void> {
     const payload = entries?.filter(Boolean).join('\n') || '';
@@ -280,13 +281,43 @@ export class LogcatPanel {
     await vscode.workspace.fs.writeFile(uri, Buffer.from(payload, 'utf8'));
     showInfo(`Log export saved: ${uri.fsPath}`);
   }
+  private async openStackSource(file: string, line: number): Promise<void> {
+    if (!/^[\w.$-]+\.(?:kt|java)$/.test(file) || !Number.isInteger(line) || line < 1) {
+      this.postMessage({ type: 'error', message: 'Invalid stack trace source location.' });
+      return;
+    }
+    const matches = await vscode.workspace.findFiles(
+      `**/${file}`,
+      '**/{build,.gradle,node_modules}/**',
+      20
+    );
+    if (matches.length === 0) {
+      this.postMessage({ type: 'error', message: `Source file not found in workspace: ${file}` });
+      return;
+    }
+    let target = matches[0];
+    if (matches.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        matches.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })),
+        { placeHolder: `Select ${file}` }
+      );
+      if (!picked) {
+        return;
+      }
+      target = picked.uri;
+    }
+    const document = await vscode.workspace.openTextDocument(target);
+    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    const position = new vscode.Position(Math.min(line - 1, Math.max(0, document.lineCount - 1)), 0);
+    editor.selection = new vscode.Selection(position, position);
+    editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  }
   private async runAppAndFilter(deviceId: string): Promise<void> {
     if (!deviceId) {
       this.postMessage({ type: 'error', message: 'Select a device first.' });
       return;
     }
     await vscode.commands.executeCommand('android-toolkit.runSelectedAlias');
-    await new Promise(resolve => setTimeout(resolve, 2200));
     await this.applyOnlyThisApp(deviceId);
   }
   private async sendDeviceList(): Promise<void> {
@@ -337,6 +368,7 @@ export class LogcatPanel {
       this.postMessage({ type: 'cleared' });
     });
     this.stream.start();
+    this.syncPidRefresh();
     const existingEntries = this.stream.getFilteredEntries();
     this.postMessage({
       type: 'entries',
@@ -380,6 +412,10 @@ export class LogcatPanel {
     if (!options?.preserveResumeIntent) {
       this.resumeStreamOnVisible = false;
     }
+    if (this.pidRefreshTimer) {
+      clearInterval(this.pidRefreshTimer);
+      this.pidRefreshTimer = undefined;
+    }
   }
 
   private startDevicePolling(): void {
@@ -420,15 +456,43 @@ export class LogcatPanel {
     }
   }
   private setFilter(filter: LogFilter): void {
-    this.filter = filter;
+    this.filter = {
+      ...filter,
+      packageName: filter.packageName ?? (typeof filter.pid === 'number' ? this.filter.packageName : undefined),
+    };
+    this.syncPidRefresh();
     if (this.stream) {
-      this.stream.setFilter(filter);
+      this.stream.setFilter(this.filter);
       const entries = this.stream.getFilteredEntries();
       this.postMessage({
         type: 'entries',
         entries: entries.map(e => this.serializeEntry(e)),
       });
     }
+  }
+  private syncPidRefresh(): void {
+    if (this.pidRefreshTimer) {
+      clearInterval(this.pidRefreshTimer);
+      this.pidRefreshTimer = undefined;
+    }
+    if (!this.filter.packageName || !this.activeDeviceId) {
+      return;
+    }
+    this.pidRefreshTimer = setInterval(() => {
+      if (!this.panel.visible || !this.activeDeviceId || !this.filter.packageName) {
+        return;
+      }
+      void waitForAppPid(this.activeDeviceId, this.filter.packageName, { attempts: 1, intervalMs: 0 })
+        .then(process => {
+          if (!process.pid || process.pid === this.filter.pid) {
+            return;
+          }
+          this.filter = { ...this.filter, pid: process.pid };
+          this.stream?.setFilter(this.filter);
+          this.postMessage({ type: 'onlyThisAppApplied', packageName: this.filter.packageName, pid: process.pid });
+          this.postMessage({ type: 'pidChanged', packageName: this.filter.packageName, pid: process.pid });
+        });
+    }, 2500);
   }
   private clearLogs(): void {
     if (this.stream) {
@@ -443,6 +507,7 @@ export class LogcatPanel {
       level: entry.level,
       tag: entry.tag,
       message: entry.message,
+      kind: entry.kind,
     };
   }
   private postMessage(message: object): void {
@@ -526,6 +591,10 @@ export class LogcatPanel {
       border-radius: 2px;
       cursor: pointer;
     }
+    .log-line.kind-crash { background: color-mix(in srgb, var(--at-error) 18%, transparent); border-left: 3px solid var(--at-error); }
+    .log-line.kind-anr { background: color-mix(in srgb, var(--at-warn) 18%, transparent); border-left: 3px solid var(--at-warn); }
+    .log-line.kind-stacktrace { padding-left: 12px; opacity: 0.92; }
+    .source-link { margin-left: 8px; min-height: 20px; padding: 1px 6px; font-size: 11px; }
     .log-line.selected { outline: 1px solid #4fc3f7; background: #4fc3f722; }
     .log-line:hover { background: var(--vscode-list-hoverBackground); }
     .log-time { color: #888; width: 85px; flex-shrink: 0; }
@@ -847,6 +916,9 @@ export class LogcatPanel {
           onlyAppPid = message.pid;
           sendFilter();
           break;
+        case 'pidChanged':
+          statusEl.textContent = 'Running · PID ' + message.pid;
+          break;
       }
     });
     function renderPinnedPresets() {
@@ -889,7 +961,7 @@ export class LogcatPanel {
     }
     function appendEntry(entry) {
       const div = document.createElement('div');
-      div.className = 'log-line';
+      div.className = 'log-line kind-' + (entry.kind || 'normal');
       const rawLine = entry.timestamp + ' ' + entry.level + '/' + entry.tag + ': ' + entry.message;
       div.dataset.raw = rawLine;
       allRenderedLines.push(rawLine);
@@ -902,11 +974,26 @@ export class LogcatPanel {
           div.classList.add('selected');
         }
       });
+      const sourceMatch = entry.message.match(/\(([\w.$-]+\.(?:kt|java)):(\d+)\)/);
+      const sourceLink = sourceMatch
+        ? '<button class="source-link" data-source-file="' + escapeHtml(sourceMatch[1]) + '" data-source-line="' + sourceMatch[2] + '">Open ' + escapeHtml(sourceMatch[1]) + ':' + sourceMatch[2] + '</button>'
+        : '';
       div.innerHTML = 
         '<span class="log-time">' + entry.timestamp.substring(6) + '</span>' +
         '<span class="log-level level-' + entry.level + '">' + entry.level + '</span>' +
         '<span class="log-tag" title="' + escapeHtml(entry.tag) + '">' + escapeHtml(entry.tag) + '</span>' +
-        '<span class="log-msg">' + escapeHtml(entry.message) + '</span>';
+        '<span class="log-msg">' + escapeHtml(entry.message) + sourceLink + '</span>';
+      const sourceButton = div.querySelector('.source-link');
+      if (sourceButton) {
+        sourceButton.addEventListener('click', event => {
+          event.stopPropagation();
+          vscode.postMessage({
+            type: 'openSource',
+            file: sourceButton.dataset.sourceFile,
+            line: Number(sourceButton.dataset.sourceLine),
+          });
+        });
+      }
       return div;
     }
     function trimRenderedLines() {

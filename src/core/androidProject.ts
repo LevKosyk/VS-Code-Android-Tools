@@ -124,6 +124,26 @@ export function findLatestApk(workspaceRoot: string, moduleName: string, variant
   const apks: string[] = [];
   const matchingApks: string[] = [];
   const variantLower = variant?.toLowerCase();
+  if (variantLower) {
+    const variantDirectory = fs.readdirSync(apkRoot, { withFileTypes: true })
+      .find(entry => entry.isDirectory() && entry.name.toLowerCase() === variantLower)?.name;
+    const metadata = path.join(apkRoot, variantDirectory || variantLower, 'output-metadata.json');
+    const metadataContent = readIfExists(metadata);
+    if (metadataContent) {
+      try {
+        const parsed = JSON.parse(metadataContent) as { elements?: Array<{ outputFile?: string; filters?: unknown[] }> };
+        const outputs = (parsed.elements || [])
+          .filter(element => element.outputFile)
+          .sort((a, b) => (a.filters?.length || 0) - (b.filters?.length || 0));
+        for (const output of outputs) {
+          const candidate = path.join(path.dirname(metadata), output.outputFile as string);
+          if (fs.existsSync(candidate)) return candidate;
+        }
+      } catch {
+        // Fall through to recursive compatibility discovery.
+      }
+    }
+  }
   while (stack.length > 0) {
     const dir = stack.pop() as string;
     const entries = fs.readdirSync(dir);

@@ -24,7 +24,7 @@ function parseDeviceStatus(status: string): DeviceStatus {
 function isEmulatorId(deviceId: string): boolean {
   return deviceId.startsWith('emulator-');
 }
-function parseDeviceLine(line: string): AndroidDevice | null {
+export function parseDeviceLine(line: string): AndroidDevice | null {
   if (!line || line.startsWith('List of') || line.startsWith('*')) {
     return null;
   }
@@ -39,21 +39,16 @@ function parseDeviceLine(line: string): AndroidDevice | null {
     status: parseDeviceStatus(statusStr),
   };
 }
+export function parseAdbDevicesOutput(output: string): AndroidDevice[] {
+  return output.split(/\r?\n/).map(line => parseDeviceLine(line.trim())).filter((item): item is AndroidDevice => item !== null);
+}
 export async function listDevices(): Promise<AndroidDevice[]> {
   const sdk = detectSdk();
   const result = await execCommand(sdk.adb, ['devices']);
   if (result.exitCode !== 0) {
     throw new AdbError('devices', result.stderr, result.exitCode);
   }
-  const devices: AndroidDevice[] = [];
-  const lines = result.stdout.split('\n');
-  for (const line of lines) {
-    const device = parseDeviceLine(line.trim());
-    if (device) {
-      devices.push(device);
-    }
-  }
-  return devices;
+  return parseAdbDevicesOutput(result.stdout);
 }
 export async function getDeviceInfo(deviceId: string): Promise<Partial<AndroidDevice>> {
   const sdk = detectSdk();
