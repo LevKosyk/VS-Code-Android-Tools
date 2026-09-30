@@ -2,7 +2,7 @@
   "name": "vscode-android-tools",
   "displayName": "Android Tools for VS Code",
   "description": "VS Code Android extension for ADB, emulator/device manager, Logcat, Gradle Run/Debug, APK install, and XML live preview",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "levkosyk",
   "license": "MIT",
   "icon": "assets/logo/logo.png",

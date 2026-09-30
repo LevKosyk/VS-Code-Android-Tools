@@ -19,7 +19,9 @@ It complements Android Studio; it does not attempt to replace the Android SDK, G
 
 ![Run on device](https://raw.githubusercontent.com/LevKosyk/VS-Code-Android-Tools/main/assets/gifs/scenario-run-debug-cycle.gif)
 
-## Version 1.0.1
+## Version 1.0.2
+
+Version 1.0.2 fixes extension activation in the published VSIX and restores the Android Project view and its Refresh command.
 
 Version 1.0.1 completes the reliability roadmap:
 
@@ -279,6 +281,12 @@ npm run release:check
 ```
 
 The release gate performs clean compilation, linting, unit and smoke tests, P0 workflow checks, runtime Extension Host verification, release metadata validation, and VSIX packaging.
+
+### Automatic publishing
+
+When a commit on `main` increases the version in `package.json`, the CI workflow publishes the verified VSIX to the Visual Studio Marketplace after all Linux, macOS, and Windows checks pass. It then creates a GitHub release with the same VSIX. Keep `package-lock.json`, `CHANGELOG.md`, and `RELEASE_NOTES.md` aligned with the new version.
+
+Marketplace publishing uses [trusted publishing](https://github.com/microsoft/vscode-vsce#trusted-publishing) instead of a stored token. In the [Marketplace publisher portal](https://marketplace.visualstudio.com/manage), configure a trusted publishing policy for publisher `levkosyk`, repository `LevKosyk/VS-Code-Android-Tools`, and workflow `ci.yml`. The workflow requests an OIDC token only in its publish job. No `VSCE_PAT` secret is needed.
 
 ## License
 
