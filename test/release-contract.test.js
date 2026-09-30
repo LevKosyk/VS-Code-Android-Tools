@@ -9,11 +9,11 @@ const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'u
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
 
-test('1.0.1 release metadata stays synchronized', () => {
-  assert.equal(pkg.version, '1.0.1');
+test('1.0.2 release metadata stays synchronized', () => {
+  assert.equal(pkg.version, '1.0.2');
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
-  assert.match(changelog, /^## \[1\.0\.1\] - \d{4}-\d{2}-\d{2}$/m);
+  assert.match(changelog, /^## \[1\.0\.2\] - \d{4}-\d{2}-\d{2}$/m);
 });
 
 test('Marketplace README documents the supported core workflow and policies', () => {
