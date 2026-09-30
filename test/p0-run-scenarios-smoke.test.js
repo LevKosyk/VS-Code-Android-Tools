@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const extensionPath = path.join(__dirname, '..', 'src', 'extension.ts');
-const source = fs.readFileSync(extensionPath, 'utf8');
+const source = fs.readFileSync(extensionPath, 'utf8').replace(/\r\n/g, '\n');
 
 function indexOfOrThrow(needle) {
   const idx = source.indexOf(needle);

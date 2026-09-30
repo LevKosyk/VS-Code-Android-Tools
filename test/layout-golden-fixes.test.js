@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { applyGoldenLayoutFixes } = require('../out/layout/layoutGoldenFixes.js');
 
 function readFixture(name) {
-  return fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8').trim();
+  return fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8').replace(/\r\n/g, '\n').trim();
 }
 
 test('layout auto-fix golden before/after snapshot', () => {
