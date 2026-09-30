@@ -35,6 +35,16 @@ async function main() {
   const expectedVersion = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8')).version;
   if (manifest.version !== expectedVersion) throw new Error(`Unexpected VSIX version: ${manifest.version}; expected ${expectedVersion}`);
   if (manifest.main !== './out/extension.js') throw new Error(`Unexpected extension entry point: ${manifest.main}`);
+  const lock = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package-lock.json'), 'utf8'));
+  const runtimePackages = Object.entries(lock.packages)
+    .filter(([name, details]) => name.startsWith('node_modules/') && !details.dev && !details.optional)
+    .map(([name]) => name);
+  for (const dependency of runtimePackages) {
+    const dependencyManifest = `extension/${dependency}/package.json`;
+    if (!zip.file(dependencyManifest)) {
+      throw new Error(`VSIX runtime dependency missing: ${dependencyManifest}`);
+    }
+  }
   console.log(`VSIX verified: ${path.basename(absolute)} (${names.length} files, version ${manifest.version})`);
 }
 
