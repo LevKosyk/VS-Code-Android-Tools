@@ -25,6 +25,7 @@ async function executeNoThrow(commandId) {
 async function runRuntimeSmoke() {
   await ensureExtensionActivated();
   const critical = [
+    'android-toolkit.refreshProjectView',
     'android-toolkit.openRunPanel',
     'android-toolkit.selectDevice',
     'android-toolkit.ciSmoke',
@@ -57,6 +58,7 @@ async function runRuntimeSmoke() {
   }
 
   // Non-destructive runtime checks.
+  await executeNoThrow('android-toolkit.refreshProjectView');
   await executeNoThrow('android-toolkit.openRunPanel');
   await executeNoThrow('android-toolkit.cancelActiveOperation');
   await executeNoThrow('android-toolkit.showGradleOutput');

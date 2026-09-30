@@ -1596,7 +1596,7 @@
     "release:notes": "node scripts/check-release.js",
     "release:sync-notes": "node scripts/sync-release-notes-from-git.js",
     "release:sync-notes:dry": "node scripts/sync-release-notes-from-git.js --dry-run",
-    "release:publish:dry-run": "node scripts/ensure-artifacts.js && npx --yes @vscode/vsce package --no-yarn --out .artifacts/android-tools-dry-run.vsix",
+    "release:publish:dry-run": "node scripts/ensure-artifacts.js && npx --yes @vscode/vsce package --no-yarn --out .artifacts/android-tools-dry-run.vsix && node scripts/verify-vsix.js .artifacts/android-tools-dry-run.vsix",
     "release:package:marketplace": "node scripts/package-marketplace.js",
     "release:automate": "node scripts/release-automate.js patch",
     "release:automate:minor": "node scripts/release-automate.js minor",
@@ -1605,7 +1605,7 @@
     "release:github:prepare": "node scripts/publish-github-releases.js --prepare-only",
     "prepublish:gate": "npm run compile && npm run lint && npm test --silent && npm run test:p0 && node scripts/check-release.js",
     "release:check": "npm run prepublish:gate && npm run test:runtime && npm run release:publish:dry-run",
-    "release:package": "npm run release:check && npx --yes @vscode/vsce package --no-yarn"
+    "release:package": "npm run release:check && npm run release:package:marketplace"
   },
   "devDependencies": {
     "@vscode/test-electron": "^2.5.2",
