@@ -13,7 +13,7 @@
       "firstCommandLatencyMs": 1000
     },
     "windows": {
-      "activationTotalMs": 500,
+      "activationTotalMs": 800,
       "firstCommandLatencyMs": 100
     }
   }
