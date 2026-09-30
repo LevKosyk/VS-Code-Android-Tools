@@ -286,7 +286,7 @@ The release gate performs clean compilation, linting, unit and smoke tests, P0 w
 
 When a commit on `main` increases the version in `package.json`, the CI workflow publishes the verified VSIX to the Visual Studio Marketplace after all Linux, macOS, and Windows checks pass. It then creates a GitHub release with the same VSIX. Keep `package-lock.json`, `CHANGELOG.md`, and `RELEASE_NOTES.md` aligned with the new version.
 
-Marketplace publishing uses [trusted publishing](https://github.com/microsoft/vscode-vsce#trusted-publishing) instead of a stored token. In the [Marketplace publisher portal](https://marketplace.visualstudio.com/manage), configure a trusted publishing policy for publisher `levkosyk`, repository `LevKosyk/VS-Code-Android-Tools`, and workflow `ci.yml`. The workflow requests an OIDC token only in its publish job. No `VSCE_PAT` secret is needed.
+For Marketplace publishing, create an Azure DevOps Personal Access Token with **All accessible organizations** and only **Marketplace (Manage)** scope, then store it as the `VSCE_PAT` repository secret in GitHub Actions. The publish job uses that secret without printing it. If the secret is absent, it attempts [trusted publishing with OIDC](https://github.com/microsoft/vscode-vsce#trusted-publishing), which requires a matching policy for publisher `levkosyk`, repository `LevKosyk/VS-Code-Android-Tools`, and workflow `ci.yml` in the Marketplace publisher portal. Confirm that the policy feature is available on the publisher account before relying on OIDC. Global Azure DevOps PATs retire on December 1, 2026; migrate to Microsoft Entra ID or available Marketplace trusted publishing before then.
 
 ## License
 
