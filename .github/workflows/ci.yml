@@ -133,7 +133,14 @@ jobs:
         if: steps.version.outputs.changed == 'true'
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: npx --yes @vscode/vsce publish --oidc --skip-duplicate --packagePath ".artifacts/vscode-android-tools-${RELEASE_VERSION}.vsix"
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          vsix=".artifacts/vscode-android-tools-${RELEASE_VERSION}.vsix"
+          if [ -n "$VSCE_PAT" ]; then
+            npx --yes @vscode/vsce publish --skip-duplicate --packagePath "$vsix"
+          else
+            npx --yes @vscode/vsce publish --oidc --skip-duplicate --packagePath "$vsix"
+          fi
 
       - name: Publish GitHub release
         if: steps.version.outputs.changed == 'true'
