@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     env:
-      NODE_VERSION: 20.11.1
+      NODE_VERSION: 22
       VSCODE_TEST_VERSION: 1.109.3
       RUNTIME_SMOKE_MAX_ATTEMPTS: 2
 
@@ -67,6 +67,9 @@ jobs:
       - name: Package extension (dry-run)
         run: npx --yes @vscode/vsce package --no-yarn --out .artifacts/android-tools.vsix
 
+      - name: Verify packaged runtime dependencies
+        run: node scripts/verify-vsix.js .artifacts/android-tools.vsix
+
       - name: Upload runtime flaky report
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,3 +93,58 @@ jobs:
           name: android-tools-vsix-${{ matrix.os }}
           path: .artifacts/android-tools.vsix
           if-no-files-found: warn
+
+  publish:
+    name: Publish Marketplace and GitHub release
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether the extension version increased
+        id: version
+        env:
+          RELEASE_BASE_SHA: ${{ github.event.before }}
+        run: node scripts/ci-release-version.js
+
+      - name: Setup Node
+        if: steps.version.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.version.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Build and verify release VSIX
+        if: steps.version.outputs.changed == 'true'
+        run: npm run release:package:marketplace
+
+      - name: Publish to Visual Studio Marketplace
+        if: steps.version.outputs.changed == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npx --yes @vscode/vsce publish --oidc --skip-duplicate --packagePath ".artifacts/vscode-android-tools-${RELEASE_VERSION}.vsix"
+
+      - name: Publish GitHub release
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="v${RELEASE_VERSION}"
+          vsix=".artifacts/vscode-android-tools-${RELEASE_VERSION}.vsix"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$vsix" --clobber
+          else
+            gh release create "$tag" "$vsix" --title "$tag" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA"
+          fi
