@@ -11,6 +11,10 @@
     "macos": {
       "activationTotalMs": 1900,
       "firstCommandLatencyMs": 1000
+    },
+    "windows": {
+      "activationTotalMs": 500,
+      "firstCommandLatencyMs": 100
     }
   }
 }
