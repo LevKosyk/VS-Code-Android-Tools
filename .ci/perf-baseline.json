@@ -14,7 +14,7 @@
     },
     "windows": {
       "activationTotalMs": 1500,
-      "firstCommandLatencyMs": 100
+      "firstCommandLatencyMs": 1000
     }
   }
 }
