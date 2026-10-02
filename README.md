@@ -284,9 +284,11 @@ The release gate performs clean compilation, linting, unit and smoke tests, P0 w
 
 ### Automatic publishing
 
-When a commit on `main` increases the version in `package.json`, the CI workflow publishes the verified VSIX to the Visual Studio Marketplace after all Linux, macOS, and Windows checks pass. It then creates a GitHub release with the same VSIX. Keep `package-lock.json`, `CHANGELOG.md`, and `RELEASE_NOTES.md` aligned with the new version.
+When a commit on `main` increases the version in `package.json`, the CI workflow publishes the verified VSIX to the Visual Studio Marketplace and Open VSX after all Linux, macOS, and Windows checks pass. It then creates a GitHub release with the same VSIX. To republish the current version (for example, to a registry that missed it), run the CI workflow manually from the Actions tab on `main` with **publish** enabled; already published versions are skipped. Keep `package-lock.json`, `CHANGELOG.md`, and `RELEASE_NOTES.md` aligned with the new version.
 
 The publish job uses the `VSCE_PAT` GitHub Actions repository secret when configured. Create an Azure DevOps Personal Access Token with **All accessible organizations** and only **Marketplace (Manage)** scope, then save it as `VSCE_PAT` in the repository's Actions secrets. The workflow never prints the token. If this secret is absent, it attempts [trusted publishing with OIDC](https://github.com/microsoft/vscode-vsce#trusted-publishing), which requires a matching Marketplace policy for publisher `levkosyk`, repository `LevKosyk/VS-Code-Android-Tools`, and workflow `ci.yml`. Global Azure DevOps PATs retire on December 1, 2026; migrate to Microsoft Entra ID or available Marketplace trusted publishing before then.
+
+Open VSX publishing requires the `OVSX_PAT` repository secret: an [Open VSX access token](https://open-vsx.org/user-settings/tokens) for an account that owns the `levkosyk` namespace.
 
 ## License
 
